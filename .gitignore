@@ -1,0 +1,9 @@
+.venv/
+.pip-cache/
+.git-codex/
+bin/
+*.log
+*.out
+*.err
+__pycache__/
+*.pyc
