@@ -491,16 +491,9 @@ namespace VoiceChatLauncher
             AutomationElement window = FindChatGptWindow();
             if (window == null)
             {
-                if (IsChatGptProcessRunning())
-                {
-                    Log("ChatGPT process is already running; waiting for a window.");
-                }
-                else
-                {
-                    LaunchChatGpt();
-                    Thread.Sleep(_config.StartupDelayMilliseconds);
-                }
-
+                Log("ChatGPT window was not found; launching ChatGPT even if a background process remains.");
+                LaunchChatGpt();
+                Thread.Sleep(_config.StartupDelayMilliseconds);
                 window = WaitForChatGptWindow();
             }
             else
@@ -607,44 +600,173 @@ namespace VoiceChatLauncher
 
         private AutomationElement FindChatGptWindow()
         {
-            AutomationElement root = AutomationElement.RootElement;
-            AutomationElementCollection windows = root.FindAll(TreeScope.Children, Condition.TrueCondition);
-            AutomationElement bestWindow = null;
+            WindowCandidate bestCandidate = null;
             double bestScore = double.MinValue;
 
-            foreach (AutomationElement window in windows)
+            foreach (WindowCandidate candidate in EnumerateChatGptWindowCandidates())
             {
-                if (!MatchesWindow(window))
+                if (candidate.Width < _config.MinimumWindowWidth ||
+                    candidate.Height < _config.MinimumWindowHeight)
                 {
+                    Log("Skipping non-main ChatGPT HWND: " + candidate);
                     continue;
                 }
 
-                Rect bounds = SafeBounds(window);
-                if (bounds.IsEmpty ||
-                    bounds.Width < _config.MinimumWindowWidth ||
-                    bounds.Height < _config.MinimumWindowHeight ||
-                    SafeIsOffscreen(window))
+                double score = candidate.Width * candidate.Height;
+                if (candidate.IsVisible)
                 {
-                    Log("Skipping non-main ChatGPT window: name='" + SafeName(window) + "' bounds=" + bounds);
-                    continue;
+                    score += 100000000;
                 }
 
-                double score = bounds.Width * bounds.Height;
-                string title = SafeName(window);
-                if (!string.IsNullOrWhiteSpace(_config.WindowTitleKeyword) &&
-                    title.IndexOf(_config.WindowTitleKeyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (!candidate.IsMinimized)
                 {
-                    score += 1000000000;
+                    score += 10000000;
                 }
 
                 if (score > bestScore)
                 {
-                    bestWindow = window;
+                    bestCandidate = candidate;
                     bestScore = score;
                 }
             }
 
-            return bestWindow;
+            if (bestCandidate == null)
+            {
+                return null;
+            }
+
+            Log("Selected ChatGPT HWND: " + bestCandidate);
+            try
+            {
+                return AutomationElement.FromHandle(bestCandidate.Handle);
+            }
+            catch (Exception ex)
+            {
+                Log("Failed to create AutomationElement from HWND: " + ex.Message);
+                return null;
+            }
+        }
+
+        private List<WindowCandidate> EnumerateChatGptWindowCandidates()
+        {
+            var candidates = new List<WindowCandidate>();
+            NativeMethods.EnumWindows(delegate (IntPtr handle, IntPtr lParam)
+            {
+                try
+                {
+                    WindowCandidate candidate = CreateWindowCandidate(handle);
+                    if (candidate != null)
+                    {
+                        candidates.Add(candidate);
+                        Log("Found ChatGPT HWND candidate: " + candidate);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log("Failed to inspect HWND " + handle + ": " + ex.Message);
+                }
+
+                return true;
+            }, IntPtr.Zero);
+
+            return candidates;
+        }
+
+        private WindowCandidate CreateWindowCandidate(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            bool isVisible = NativeMethods.IsWindowVisible(handle);
+            bool isMinimized = NativeMethods.IsIconic(handle);
+            if (!isVisible && !isMinimized)
+            {
+                return null;
+            }
+
+            int processId;
+            NativeMethods.GetWindowThreadProcessId(handle, out processId);
+            if (processId <= 0)
+            {
+                return null;
+            }
+
+            string processName;
+            try
+            {
+                processName = Process.GetProcessById(processId).ProcessName;
+            }
+            catch
+            {
+                return null;
+            }
+
+            bool processMatches = false;
+            foreach (string expected in _config.ProcessNames)
+            {
+                if (MatchesProcessName(processName, expected))
+                {
+                    processMatches = true;
+                    break;
+                }
+            }
+
+            if (!processMatches)
+            {
+                return null;
+            }
+
+            NativeMethods.RECT rect = GetEffectiveWindowRect(handle);
+            int width = Math.Max(0, rect.Right - rect.Left);
+            int height = Math.Max(0, rect.Bottom - rect.Top);
+            return new WindowCandidate
+            {
+                Handle = handle,
+                ProcessId = processId,
+                ProcessName = processName,
+                Title = GetWindowText(handle),
+                ClassName = GetClassName(handle),
+                IsVisible = isVisible,
+                IsMinimized = isMinimized,
+                Left = rect.Left,
+                Top = rect.Top,
+                Width = width,
+                Height = height
+            };
+        }
+
+        private NativeMethods.RECT GetEffectiveWindowRect(IntPtr handle)
+        {
+            var placement = new NativeMethods.WINDOWPLACEMENT();
+            placement.length = Marshal.SizeOf(typeof(NativeMethods.WINDOWPLACEMENT));
+            if (NativeMethods.GetWindowPlacement(handle, ref placement) && NativeMethods.IsIconic(handle))
+            {
+                return placement.rcNormalPosition;
+            }
+
+            NativeMethods.RECT rect;
+            if (NativeMethods.GetWindowRect(handle, out rect))
+            {
+                return rect;
+            }
+
+            return new NativeMethods.RECT();
+        }
+
+        private string GetWindowText(IntPtr handle)
+        {
+            var builder = new StringBuilder(512);
+            NativeMethods.GetWindowText(handle, builder, builder.Capacity);
+            return builder.ToString();
+        }
+
+        private string GetClassName(IntPtr handle)
+        {
+            var builder = new StringBuilder(256);
+            NativeMethods.GetClassName(handle, builder, builder.Capacity);
+            return builder.ToString();
         }
 
         private bool MatchesWindow(AutomationElement window)
@@ -1187,6 +1309,33 @@ namespace VoiceChatLauncher
         }
     }
 
+    internal sealed class WindowCandidate
+    {
+        public IntPtr Handle;
+        public int ProcessId;
+        public string ProcessName;
+        public string Title;
+        public string ClassName;
+        public bool IsVisible;
+        public bool IsMinimized;
+        public int Left;
+        public int Top;
+        public int Width;
+        public int Height;
+
+        public override string ToString()
+        {
+            return "hwnd=" + Handle +
+                " pid=" + ProcessId +
+                " process='" + ProcessName + "'" +
+                " title='" + Title + "'" +
+                " class='" + ClassName + "'" +
+                " visible=" + IsVisible +
+                " minimized=" + IsMinimized +
+                " rect=" + Left + "," + Top + "," + Width + "x" + Height;
+        }
+    }
+
     internal sealed class AppConfig
     {
         public List<string> Keywords = new List<string>();
@@ -1554,6 +1703,8 @@ ButtonTimeoutMilliseconds=15000
 
     internal static class NativeMethods
     {
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
         public const int SW_RESTORE = 9;
         public const int SW_SHOW = 5;
         public const int MOUSEEVENTF_LEFTDOWN = 0x0002;
@@ -1570,6 +1721,24 @@ ButtonTimeoutMilliseconds=15000
 
         [DllImport("user32.dll")]
         public static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
 
         [DllImport("user32.dll")]
         public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -1596,6 +1765,24 @@ ButtonTimeoutMilliseconds=15000
             public int Top;
             public int Right;
             public int Bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct POINT
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WINDOWPLACEMENT
+        {
+            public int length;
+            public int flags;
+            public int showCmd;
+            public POINT ptMinPosition;
+            public POINT ptMaxPosition;
+            public RECT rcNormalPosition;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
