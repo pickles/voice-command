@@ -34,10 +34,12 @@ namespace VoiceChatLauncher
         private readonly string _configPath;
         private readonly string _logPath;
         private NotifyIcon _notifyIcon;
+        private MenuItem _toggleListeningMenuItem;
         private SettingsForm _settingsForm;
         private AppConfig _config;
         private SpeechRecognitionEngine _recognizer;
         private OpenWakeWordListener _wakeWordListener;
+        private bool _isListeningPaused;
         private bool _isRunningAction;
         private DateTime _lastTriggered = DateTime.MinValue;
         private DateTime _lastAudioLevelLog = DateTime.MinValue;
@@ -59,6 +61,7 @@ namespace VoiceChatLauncher
             var menu = new ContextMenu();
             menu.MenuItems.Add("状態を表示", delegate { ShowStatus(); });
             menu.MenuItems.Add("今すぐ起動", delegate { TriggerAction("tray"); });
+            _toggleListeningMenuItem = menu.MenuItems.Add("音声認識を一時停止", delegate { ToggleListeningPaused(); });
             menu.MenuItems.Add("-");
             menu.MenuItems.Add("設定", delegate { OpenConfig(); });
             menu.MenuItems.Add("設定を再読み込み", delegate { Reload(); });
@@ -71,6 +74,7 @@ namespace VoiceChatLauncher
             _notifyIcon.Visible = true;
             _notifyIcon.ContextMenu = menu;
             _notifyIcon.DoubleClick += delegate { TriggerAction("tray-double-click"); };
+            UpdateListeningUi();
         }
 
         private void LoadConfiguration()
@@ -83,8 +87,15 @@ namespace VoiceChatLauncher
         {
             StopListening();
             LoadConfiguration();
-            StartListening();
-            ShowBalloon("設定を再読み込みしました", "合図: " + string.Join(", ", _config.Keywords));
+            if (!_isListeningPaused)
+            {
+                StartListening();
+            }
+
+            UpdateListeningUi();
+            ShowBalloon(
+                "設定を再読み込みしました",
+                _isListeningPaused ? "音声認識は一時停止中です" : "合図: " + GetCueText());
         }
 
         private void TriggerStartupActionIfNeeded()
@@ -103,9 +114,17 @@ namespace VoiceChatLauncher
 
         private void StartListening()
         {
+            if (_isListeningPaused)
+            {
+                Log("Listening start skipped because recognition is paused");
+                UpdateListeningUi();
+                return;
+            }
+
             if (_config.UseOpenWakeWord)
             {
                 StartOpenWakeWordListening();
+                UpdateListeningUi();
                 return;
             }
 
@@ -161,6 +180,10 @@ namespace VoiceChatLauncher
                 Log("Failed to start listening: " + ex);
                 ShowBalloon("待ち受けを開始できません", ShortMessage(ex));
             }
+            finally
+            {
+                UpdateListeningUi();
+            }
         }
 
         private void StopListening()
@@ -191,7 +214,47 @@ namespace VoiceChatLauncher
             finally
             {
                 _recognizer = null;
+                UpdateListeningUi();
             }
+        }
+
+        private void ToggleListeningPaused()
+        {
+            if (_isListeningPaused)
+            {
+                ResumeListening();
+                return;
+            }
+
+            PauseListening();
+        }
+
+        private void PauseListening()
+        {
+            if (_isListeningPaused)
+            {
+                return;
+            }
+
+            _isListeningPaused = true;
+            StopListening();
+            Log("Listening paused by user");
+            UpdateListeningUi();
+            ShowBalloon("音声認識を一時停止しました", "一時停止中は音声コマンドを処理しません");
+        }
+
+        private void ResumeListening()
+        {
+            if (!_isListeningPaused)
+            {
+                return;
+            }
+
+            _isListeningPaused = false;
+            Log("Listening resumed by user");
+            StartListening();
+            UpdateListeningUi();
+            ShowBalloon("音声認識を再開しました", "合図: " + GetCueText());
         }
 
         private void StartOpenWakeWordListening()
@@ -403,6 +466,14 @@ namespace VoiceChatLauncher
 
         private void TriggerAction(string source)
         {
+            if (_isListeningPaused &&
+                (source.StartsWith("voice:", StringComparison.OrdinalIgnoreCase) ||
+                source.StartsWith("wakeword:", StringComparison.OrdinalIgnoreCase)))
+            {
+                Log("Voice trigger ignored because recognition is paused: " + source);
+                return;
+            }
+
             if ((DateTime.Now - _lastTriggered).TotalMilliseconds < _config.CooldownMilliseconds)
             {
                 Log("Trigger ignored during cooldown: " + source);
@@ -1125,7 +1196,11 @@ namespace VoiceChatLauncher
         private void ShowStatus()
         {
             string recognizer;
-            if (_config.UseOpenWakeWord)
+            if (_isListeningPaused)
+            {
+                recognizer = "一時停止中";
+            }
+            else if (_config.UseOpenWakeWord)
             {
                 recognizer = _wakeWordListener == null || !_wakeWordListener.IsRunning
                     ? "OpenWakeWord 停止中"
@@ -1139,14 +1214,58 @@ namespace VoiceChatLauncher
             }
 
             MessageBox.Show(
-                "状態: " + ((_config.UseOpenWakeWord && _wakeWordListener != null && _wakeWordListener.IsRunning) || _recognizer != null ? "待ち受け中" : "停止中") + Environment.NewLine +
+                "状態: " + GetListeningStateText() + Environment.NewLine +
                 "音声認識: " + recognizer + Environment.NewLine +
-                "合図: " + (_config.UseOpenWakeWord ? _config.OpenWakeWordModels.Replace("_", " ") : string.Join(", ", _config.Keywords)) + Environment.NewLine +
+                "合図: " + GetCueText() + Environment.NewLine +
                 "起動: " + _config.LaunchCommand + Environment.NewLine +
                 "ログ: " + _logPath,
                 "Voice Chat Launcher",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+        }
+
+        private string GetCueText()
+        {
+            if (_config == null)
+            {
+                return string.Empty;
+            }
+
+            return _config.UseOpenWakeWord
+                ? _config.OpenWakeWordModels.Replace("_", " ")
+                : string.Join(", ", _config.Keywords);
+        }
+
+        private string GetListeningStateText()
+        {
+            if (_isListeningPaused)
+            {
+                return "一時停止中";
+            }
+
+            return IsListeningActive() ? "待ち受け中" : "停止中";
+        }
+
+        private bool IsListeningActive()
+        {
+            return (_config != null && _config.UseOpenWakeWord && _wakeWordListener != null && _wakeWordListener.IsRunning) ||
+                _recognizer != null;
+        }
+
+        private void UpdateListeningUi()
+        {
+            if (_toggleListeningMenuItem != null)
+            {
+                _toggleListeningMenuItem.Text = _isListeningPaused ? "音声認識を再開" : "音声認識を一時停止";
+                _toggleListeningMenuItem.Checked = _isListeningPaused;
+            }
+
+            if (_notifyIcon != null)
+            {
+                _notifyIcon.Text = _isListeningPaused
+                    ? "Voice Chat Launcher (一時停止中)"
+                    : "Voice Chat Launcher";
+            }
         }
 
         private void OpenConfig()
