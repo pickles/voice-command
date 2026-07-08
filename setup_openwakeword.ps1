@@ -1,19 +1,36 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$python = Join-Path $root ".venv\Scripts\python.exe"
-$cache = Join-Path $root ".pip-cache"
+$models = Join-Path $root "models"
+$packages = Join-Path $root "packages"
+$dependencyProject = Join-Path $root "src\VoiceChatLauncher\VoiceChatLauncher.Dependencies.csproj"
+$nugetConfig = Join-Path $root "NuGet.config"
 
-if (-not (Test-Path $python)) {
-    python -m venv (Join-Path $root ".venv")
+New-Item -ItemType Directory -Force -Path $models | Out-Null
+
+& dotnet restore $dependencyProject --packages $packages --configfile $nugetConfig
+if ($LASTEXITCODE -ne 0) {
+    throw "Dependency restore failed with exit code $LASTEXITCODE"
 }
 
-$env:PIP_CACHE_DIR = $cache
-& $python -m pip install --upgrade pip
-& $python -m pip install openwakeword sounddevice numpy
+function Save-Model($FileName) {
+    $target = Join-Path $models $FileName
+    if (Test-Path $target) {
+        return
+    }
 
-@"
-import openwakeword.utils
-openwakeword.utils.download_models()
-print("OpenWakeWord is ready.")
-"@ | & $python -
+    $url = "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/$FileName"
+    Write-Host "Downloading $FileName"
+    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $target
+}
+
+Save-Model "melspectrogram.onnx"
+Save-Model "embedding_model.onnx"
+Save-Model "alexa_v0.1.onnx"
+Save-Model "hey_jarvis_v0.1.onnx"
+Save-Model "hey_mycroft_v0.1.onnx"
+Save-Model "hey_rhasspy_v0.1.onnx"
+Save-Model "timer_v0.1.onnx"
+Save-Model "weather_v0.1.onnx"
+
+Write-Host "OpenWakeWord C# runtime is ready."

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Speech.Recognition;
 using System.Text;
@@ -11,6 +12,8 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Forms;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace VoiceChatLauncher
 {
@@ -34,7 +37,7 @@ namespace VoiceChatLauncher
         private SettingsForm _settingsForm;
         private AppConfig _config;
         private SpeechRecognitionEngine _recognizer;
-        private Process _wakeWordProcess;
+        private OpenWakeWordListener _wakeWordListener;
         private bool _isRunningAction;
         private DateTime _lastTriggered = DateTime.MinValue;
         private DateTime _lastAudioLevelLog = DateTime.MinValue;
@@ -195,125 +198,72 @@ namespace VoiceChatLauncher
         {
             try
             {
-                string pythonPath = ResolvePath(_config.OpenWakeWordPythonPath);
-                string scriptPath = ResolvePath(_config.OpenWakeWordScriptPath);
-                if (!File.Exists(pythonPath))
+                var options = new OpenWakeWordOptions();
+                options.Models = _config.OpenWakeWordModels;
+                options.Threshold = _config.OpenWakeWordThreshold;
+                options.CooldownMilliseconds = _config.CooldownMilliseconds;
+                options.Device = _config.OpenWakeWordDevice;
+                options.LogScores = _config.OpenWakeWordLogScores;
+                options.MelspectrogramModelPath = ResolvePath(_config.OpenWakeWordMelspectrogramModelPath);
+                options.EmbeddingModelPath = ResolvePath(_config.OpenWakeWordEmbeddingModelPath);
+                options.BaseDirectory = _baseDirectory;
+
+                _wakeWordListener = new OpenWakeWordListener(options);
+                _wakeWordListener.LogMessage += OnOpenWakeWordLogMessage;
+                _wakeWordListener.WakeWordDetected += OnOpenWakeWordDetected;
+                _wakeWordListener.Start();
+
+                if (_config.OpenWakeWordVadThreshold > 0)
                 {
-                    throw new FileNotFoundException("OpenWakeWord Python が見つかりません。setup_openwakeword.ps1 を実行してください。", pythonPath);
+                    Log("OpenWakeWord VAD threshold is configured but is not supported by the C# runtime yet.");
                 }
 
-                if (!File.Exists(scriptPath))
-                {
-                    throw new FileNotFoundException("OpenWakeWord listener script が見つかりません。", scriptPath);
-                }
-
-                var startInfo = new ProcessStartInfo();
-                startInfo.FileName = pythonPath;
-                startInfo.Arguments =
-                    QuoteArgument(scriptPath) +
-                    " --models " + QuoteArgument(_config.OpenWakeWordModels) +
-                    " --threshold " + _config.OpenWakeWordThreshold.ToString("0.###", CultureInfo.InvariantCulture) +
-                    " --cooldown-ms " + _config.CooldownMilliseconds.ToString(CultureInfo.InvariantCulture) +
-                    " --vad-threshold " + _config.OpenWakeWordVadThreshold.ToString("0.###", CultureInfo.InvariantCulture);
-
-                if (!string.IsNullOrWhiteSpace(_config.OpenWakeWordDevice))
-                {
-                    startInfo.Arguments += " --device " + QuoteArgument(_config.OpenWakeWordDevice);
-                }
-
-                if (_config.OpenWakeWordLogScores)
-                {
-                    startInfo.Arguments += " --log-scores";
-                }
-
-                startInfo.WorkingDirectory = _baseDirectory;
-                startInfo.UseShellExecute = false;
-                startInfo.CreateNoWindow = true;
-                startInfo.RedirectStandardOutput = true;
-                startInfo.RedirectStandardError = true;
-
-                _wakeWordProcess = new Process();
-                _wakeWordProcess.StartInfo = startInfo;
-                _wakeWordProcess.EnableRaisingEvents = true;
-                _wakeWordProcess.OutputDataReceived += OnOpenWakeWordOutput;
-                _wakeWordProcess.ErrorDataReceived += OnOpenWakeWordError;
-                _wakeWordProcess.Exited += OnOpenWakeWordExited;
-                _wakeWordProcess.Start();
-                _wakeWordProcess.BeginOutputReadLine();
-                _wakeWordProcess.BeginErrorReadLine();
-
-                Log("OpenWakeWord listener started: " + startInfo.FileName + " " + startInfo.Arguments);
+                Log("OpenWakeWord C# runtime started: models=" + _config.OpenWakeWordModels);
                 ShowBalloon("待ち受けを開始しました", "WakeWord: " + _config.OpenWakeWordModels.Replace("_", " "));
             }
             catch (Exception ex)
             {
-                Log("Failed to start OpenWakeWord listener: " + ex);
+                Log("Failed to start OpenWakeWord C# runtime: " + ex);
                 ShowBalloon("OpenWakeWord を開始できません", ShortMessage(ex));
             }
         }
 
         private void StopOpenWakeWordListening()
         {
-            if (_wakeWordProcess == null)
+            if (_wakeWordListener == null)
             {
                 return;
             }
 
             try
             {
-                _wakeWordProcess.OutputDataReceived -= OnOpenWakeWordOutput;
-                _wakeWordProcess.ErrorDataReceived -= OnOpenWakeWordError;
-                _wakeWordProcess.Exited -= OnOpenWakeWordExited;
-                if (!_wakeWordProcess.HasExited)
-                {
-                    _wakeWordProcess.Kill();
-                }
-
-                _wakeWordProcess.Dispose();
+                _wakeWordListener.WakeWordDetected -= OnOpenWakeWordDetected;
+                _wakeWordListener.LogMessage -= OnOpenWakeWordLogMessage;
+                _wakeWordListener.Dispose();
             }
             catch (Exception ex)
             {
-                Log("Failed to stop OpenWakeWord listener: " + ex);
+                Log("Failed to stop OpenWakeWord C# runtime: " + ex);
             }
             finally
             {
-                _wakeWordProcess = null;
+                _wakeWordListener = null;
             }
         }
 
-        private void OnOpenWakeWordOutput(object sender, DataReceivedEventArgs e)
+        private void OnOpenWakeWordLogMessage(object sender, OpenWakeWordLogEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(e.Data))
+            if (!string.IsNullOrWhiteSpace(e.Message))
             {
-                return;
-            }
-
-            Log("OpenWakeWord: " + e.Data);
-            if (e.Data.StartsWith("WAKE ", StringComparison.OrdinalIgnoreCase))
-            {
-                TriggerAction("wakeword:" + e.Data);
+                Log("OpenWakeWord: " + e.Message);
             }
         }
 
-        private void OnOpenWakeWordError(object sender, DataReceivedEventArgs e)
+        private void OnOpenWakeWordDetected(object sender, WakeWordDetectedEventArgs e)
         {
-            if (!string.IsNullOrWhiteSpace(e.Data))
-            {
-                Log("OpenWakeWord error: " + e.Data);
-            }
-        }
-
-        private void OnOpenWakeWordExited(object sender, EventArgs e)
-        {
-            try
-            {
-                int exitCode = _wakeWordProcess == null ? -1 : _wakeWordProcess.ExitCode;
-                Log("OpenWakeWord listener exited: " + exitCode);
-            }
-            catch
-            {
-                Log("OpenWakeWord listener exited");
-            }
+            string line = "WAKE " + e.Name + " " + e.Score.ToString("0.000", CultureInfo.InvariantCulture);
+            Log("OpenWakeWord: " + line);
+            TriggerAction("wakeword:" + line);
         }
 
         private RecognizerInfo FindRecognizer(string cultureName)
@@ -1177,7 +1127,7 @@ namespace VoiceChatLauncher
             string recognizer;
             if (_config.UseOpenWakeWord)
             {
-                recognizer = _wakeWordProcess == null || _wakeWordProcess.HasExited
+                recognizer = _wakeWordListener == null || !_wakeWordListener.IsRunning
                     ? "OpenWakeWord 停止中"
                     : "OpenWakeWord 待ち受け中 (" + _config.OpenWakeWordModels + ")";
             }
@@ -1189,7 +1139,7 @@ namespace VoiceChatLauncher
             }
 
             MessageBox.Show(
-                "状態: " + ((_config.UseOpenWakeWord && _wakeWordProcess != null && !_wakeWordProcess.HasExited) || _recognizer != null ? "待ち受け中" : "停止中") + Environment.NewLine +
+                "状態: " + ((_config.UseOpenWakeWord && _wakeWordListener != null && _wakeWordListener.IsRunning) || _recognizer != null ? "待ち受け中" : "停止中") + Environment.NewLine +
                 "音声認識: " + recognizer + Environment.NewLine +
                 "合図: " + (_config.UseOpenWakeWord ? _config.OpenWakeWordModels.Replace("_", " ") : string.Join(", ", _config.Keywords)) + Environment.NewLine +
                 "起動: " + _config.LaunchCommand + Environment.NewLine +
@@ -1341,9 +1291,9 @@ namespace VoiceChatLauncher
         private readonly AppConfig _config;
         private readonly string _configPath;
         private ComboBox _listenEngineBox;
-        private TextBox _openWakeWordPythonPathBox;
-        private TextBox _openWakeWordScriptPathBox;
         private TextBox _openWakeWordModelsBox;
+        private TextBox _openWakeWordMelspectrogramModelPathBox;
+        private TextBox _openWakeWordEmbeddingModelPathBox;
         private NumericUpDown _openWakeWordThresholdBox;
         private TextBox _openWakeWordDeviceBox;
         private NumericUpDown _openWakeWordVadThresholdBox;
@@ -1436,12 +1386,12 @@ namespace VoiceChatLauncher
             var panel = CreateFormPanel();
 
             _openWakeWordModelsBox = AddTextBox(panel, "モデル", "例: hey_jarvis または ..\\models\\wakeword.onnx");
+            _openWakeWordMelspectrogramModelPathBox = AddTextBox(panel, "Melモデル", "例: ..\\models\\melspectrogram.onnx");
+            _openWakeWordEmbeddingModelPathBox = AddTextBox(panel, "Embeddingモデル", "例: ..\\models\\embedding_model.onnx");
             _openWakeWordThresholdBox = AddDecimalBox(panel, "しきい値", 0, 1, 2, 0.01m);
             _openWakeWordDeviceBox = AddTextBox(panel, "マイクデバイス", "空なら既定のマイク");
             _openWakeWordVadThresholdBox = AddDecimalBox(panel, "VADしきい値", 0, 1, 2, 0.01m);
             _openWakeWordLogScoresBox = AddCheckBox(panel, "スコアをログ出力する");
-            _openWakeWordPythonPathBox = AddTextBox(panel, "Pythonパス", "例: ..\\.venv\\Scripts\\python.exe");
-            _openWakeWordScriptPathBox = AddTextBox(panel, "スクリプトパス", "例: ..\\scripts\\openwakeword_listener.py");
 
             tab.Controls.Add(panel);
             return tab;
@@ -1557,9 +1507,9 @@ namespace VoiceChatLauncher
         private void LoadValues()
         {
             _listenEngineBox.SelectedItem = _config.UseOpenWakeWord ? "openwakeword" : "windows";
-            _openWakeWordPythonPathBox.Text = _config.OpenWakeWordPythonPath;
-            _openWakeWordScriptPathBox.Text = _config.OpenWakeWordScriptPath;
             _openWakeWordModelsBox.Text = _config.OpenWakeWordModels;
+            _openWakeWordMelspectrogramModelPathBox.Text = _config.OpenWakeWordMelspectrogramModelPath;
+            _openWakeWordEmbeddingModelPathBox.Text = _config.OpenWakeWordEmbeddingModelPath;
             _openWakeWordThresholdBox.Value = ClampDecimal((decimal)_config.OpenWakeWordThreshold, _openWakeWordThresholdBox.Minimum, _openWakeWordThresholdBox.Maximum);
             _openWakeWordDeviceBox.Text = _config.OpenWakeWordDevice;
             _openWakeWordVadThresholdBox.Value = ClampDecimal((decimal)_config.OpenWakeWordVadThreshold, _openWakeWordVadThresholdBox.Minimum, _openWakeWordVadThresholdBox.Maximum);
@@ -1598,9 +1548,9 @@ namespace VoiceChatLauncher
                 }
 
                 _config.ListenEngine = listenEngine;
-                _config.OpenWakeWordPythonPath = _openWakeWordPythonPathBox.Text.Trim();
-                _config.OpenWakeWordScriptPath = _openWakeWordScriptPathBox.Text.Trim();
                 _config.OpenWakeWordModels = models;
+                _config.OpenWakeWordMelspectrogramModelPath = _openWakeWordMelspectrogramModelPathBox.Text.Trim();
+                _config.OpenWakeWordEmbeddingModelPath = _openWakeWordEmbeddingModelPathBox.Text.Trim();
                 _config.OpenWakeWordThreshold = (float)_openWakeWordThresholdBox.Value;
                 _config.OpenWakeWordDevice = _openWakeWordDeviceBox.Text.Trim();
                 _config.OpenWakeWordVadThreshold = (float)_openWakeWordVadThresholdBox.Value;
@@ -1667,6 +1617,843 @@ namespace VoiceChatLauncher
         }
     }
 
+    internal sealed class OpenWakeWordOptions
+    {
+        public string BaseDirectory;
+        public string Models;
+        public string MelspectrogramModelPath;
+        public string EmbeddingModelPath;
+        public float Threshold;
+        public int CooldownMilliseconds;
+        public string Device;
+        public bool LogScores;
+    }
+
+    internal sealed class OpenWakeWordLogEventArgs : EventArgs
+    {
+        public OpenWakeWordLogEventArgs(string message)
+        {
+            Message = message;
+        }
+
+        public string Message { get; private set; }
+    }
+
+    internal sealed class WakeWordDetectedEventArgs : EventArgs
+    {
+        public WakeWordDetectedEventArgs(string name, float score)
+        {
+            Name = name;
+            Score = score;
+        }
+
+        public string Name { get; private set; }
+        public float Score { get; private set; }
+    }
+
+    internal sealed class OpenWakeWordListener : IDisposable
+    {
+        private readonly OpenWakeWordOptions _options;
+        private OpenWakeWordRuntime _runtime;
+        private WaveInAudioSource _audioSource;
+        private DateTime _lastWake = DateTime.MinValue;
+        private bool _disposed;
+
+        public event EventHandler<OpenWakeWordLogEventArgs> LogMessage;
+        public event EventHandler<WakeWordDetectedEventArgs> WakeWordDetected;
+
+        public OpenWakeWordListener(OpenWakeWordOptions options)
+        {
+            _options = options;
+        }
+
+        public bool IsRunning
+        {
+            get { return _audioSource != null && _audioSource.IsRunning; }
+        }
+
+        public void Start()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException("OpenWakeWordListener");
+            }
+
+            _runtime = new OpenWakeWordRuntime(_options, Log);
+            int deviceId = WaveInAudioSource.ParseDeviceId(_options.Device);
+            _audioSource = new WaveInAudioSource(deviceId, 16000, 1, 1280);
+            _audioSource.AudioAvailable += OnAudioAvailable;
+            _audioSource.Start();
+
+            Log("READY models=" + _options.Models +
+                " threshold=" + _options.Threshold.ToString("0.###", CultureInfo.InvariantCulture) +
+                " cooldown_ms=" + _options.CooldownMilliseconds.ToString(CultureInfo.InvariantCulture) +
+                " device=" + _audioSource.DeviceDescription);
+        }
+
+        private void OnAudioAvailable(object sender, AudioFrameEventArgs e)
+        {
+            try
+            {
+                WakeWordPrediction prediction = _runtime.Predict(e.Samples);
+                if (_options.LogScores && !string.IsNullOrEmpty(prediction.Name))
+                {
+                    Log("SCORE " + prediction.Name + " " + prediction.Score.ToString("0.000", CultureInfo.InvariantCulture));
+                }
+
+                if (!string.IsNullOrEmpty(prediction.Name) && prediction.Score >= _options.Threshold)
+                {
+                    DateTime now = DateTime.Now;
+                    if ((now - _lastWake).TotalMilliseconds >= _options.CooldownMilliseconds)
+                    {
+                        _lastWake = now;
+                        EventHandler<WakeWordDetectedEventArgs> handler = WakeWordDetected;
+                        if (handler != null)
+                        {
+                            handler(this, new WakeWordDetectedEventArgs(prediction.Name, prediction.Score));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("ERROR " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        private void Log(string message)
+        {
+            EventHandler<OpenWakeWordLogEventArgs> handler = LogMessage;
+            if (handler != null)
+            {
+                handler(this, new OpenWakeWordLogEventArgs(message));
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (_audioSource != null)
+            {
+                _audioSource.AudioAvailable -= OnAudioAvailable;
+                _audioSource.Dispose();
+                _audioSource = null;
+            }
+
+            if (_runtime != null)
+            {
+                _runtime.Dispose();
+                _runtime = null;
+            }
+        }
+    }
+
+    internal struct WakeWordPrediction
+    {
+        public string Name;
+        public float Score;
+    }
+
+    internal sealed class OpenWakeWordRuntime : IDisposable
+    {
+        private readonly AudioFeatureExtractor _features;
+        private readonly List<WakeWordModel> _models = new List<WakeWordModel>();
+        private readonly Dictionary<string, Queue<float>> _predictionBuffers = new Dictionary<string, Queue<float>>();
+
+        public OpenWakeWordRuntime(OpenWakeWordOptions options, Action<string> log)
+        {
+            if (!File.Exists(options.MelspectrogramModelPath))
+            {
+                throw new FileNotFoundException("OpenWakeWord melspectrogram model が見つかりません。setup_openwakeword.ps1 を実行してください。", options.MelspectrogramModelPath);
+            }
+
+            if (!File.Exists(options.EmbeddingModelPath))
+            {
+                throw new FileNotFoundException("OpenWakeWord embedding model が見つかりません。setup_openwakeword.ps1 を実行してください。", options.EmbeddingModelPath);
+            }
+
+            _features = new AudioFeatureExtractor(options.MelspectrogramModelPath, options.EmbeddingModelPath);
+
+            foreach (string item in SplitModelList(options.Models))
+            {
+                string modelPath = ResolveModelPath(options.BaseDirectory, item);
+                if (!File.Exists(modelPath))
+                {
+                    throw new FileNotFoundException("OpenWakeWord model が見つかりません。", modelPath);
+                }
+
+                var model = new WakeWordModel(item, modelPath);
+                _models.Add(model);
+                if (!_predictionBuffers.ContainsKey(model.Name))
+                {
+                    _predictionBuffers.Add(model.Name, new Queue<float>());
+                }
+
+                if (log != null)
+                {
+                    log("Loaded model " + model.Name + " from " + modelPath);
+                }
+            }
+
+            if (_models.Count == 0)
+            {
+                throw new InvalidOperationException("OpenWakeWordModels が空です。");
+            }
+        }
+
+        public WakeWordPrediction Predict(short[] audio)
+        {
+            int preparedSamples = _features.Process(audio);
+            var best = new WakeWordPrediction();
+            best.Name = string.Empty;
+            best.Score = 0;
+
+            foreach (WakeWordModel model in _models)
+            {
+                float[] input = _features.GetFeatures(model.InputFrames);
+                float score = model.Predict(input);
+                Queue<float> buffer = _predictionBuffers[model.Name];
+
+                if (buffer.Count < 5)
+                {
+                    score = 0;
+                }
+
+                buffer.Enqueue(score);
+                while (buffer.Count > 30)
+                {
+                    buffer.Dequeue();
+                }
+
+                if (preparedSamples >= 1280 && score > best.Score)
+                {
+                    best.Name = model.Name;
+                    best.Score = score;
+                }
+            }
+
+            return best;
+        }
+
+        public void Dispose()
+        {
+            foreach (WakeWordModel model in _models)
+            {
+                model.Dispose();
+            }
+
+            _models.Clear();
+            if (_features != null)
+            {
+                _features.Dispose();
+            }
+        }
+
+        private static IEnumerable<string> SplitModelList(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                yield break;
+            }
+
+            string[] parts = value.Replace(",", "|").Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string part in parts)
+            {
+                string trimmed = part.Trim();
+                if (trimmed.Length > 0)
+                {
+                    yield return trimmed;
+                }
+            }
+        }
+
+        private static string ResolveModelPath(string baseDirectory, string model)
+        {
+            if (model.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFullPath(Path.IsPathRooted(model) ? model : Path.Combine(baseDirectory, model));
+            }
+
+            string fileName = model.Replace(" ", "_") + "_v0.1.onnx";
+            return Path.GetFullPath(Path.Combine(baseDirectory, "..", "models", fileName));
+        }
+    }
+
+    internal sealed class WakeWordModel : IDisposable
+    {
+        private readonly InferenceSession _session;
+        private readonly string _inputName;
+
+        public WakeWordModel(string configuredName, string path)
+        {
+            Name = CreateModelName(configuredName, path);
+            _session = CreateSession(path);
+            _inputName = _session.InputMetadata.Keys.First();
+            InputFrames = 16;
+            int[] dimensions = _session.InputMetadata[_inputName].Dimensions;
+            if (dimensions != null && dimensions.Length >= 2 && dimensions[1] > 0)
+            {
+                InputFrames = dimensions[1];
+            }
+        }
+
+        public string Name { get; private set; }
+        public int InputFrames { get; private set; }
+
+        public float Predict(float[] features)
+        {
+            var tensor = new DenseTensor<float>(features, new[] { 1, InputFrames, 96 });
+            using (var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(_inputName, tensor) }))
+            {
+                return results.First().AsEnumerable<float>().First();
+            }
+        }
+
+        public void Dispose()
+        {
+            _session.Dispose();
+        }
+
+        private static InferenceSession CreateSession(string path)
+        {
+            var options = new SessionOptions();
+            options.InterOpNumThreads = 1;
+            options.IntraOpNumThreads = 1;
+            return new InferenceSession(path, options);
+        }
+
+        private static string CreateModelName(string configuredName, string path)
+        {
+            if (!configuredName.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
+            {
+                return configuredName.Replace(" ", "_");
+            }
+
+            return Path.GetFileNameWithoutExtension(path);
+        }
+    }
+
+    internal sealed class AudioFeatureExtractor : IDisposable
+    {
+        private readonly InferenceSession _melspectrogramSession;
+        private readonly InferenceSession _embeddingSession;
+        private readonly string _melspectrogramInputName;
+        private readonly string _embeddingInputName;
+        private readonly RingBuffer<short> _rawDataBuffer = new RingBuffer<short>(16000 * 10);
+        private readonly List<float[]> _melspectrogramBuffer = new List<float[]>();
+        private readonly List<float[]> _featureBuffer = new List<float[]>();
+        private readonly List<short> _rawRemainder = new List<short>();
+        private int _accumulatedSamples;
+
+        public AudioFeatureExtractor(string melspectrogramModelPath, string embeddingModelPath)
+        {
+            _melspectrogramSession = CreateSession(melspectrogramModelPath);
+            _embeddingSession = CreateSession(embeddingModelPath);
+            _melspectrogramInputName = _melspectrogramSession.InputMetadata.Keys.First();
+            _embeddingInputName = _embeddingSession.InputMetadata.Keys.First();
+            Reset();
+        }
+
+        public void Reset()
+        {
+            _rawDataBuffer.Clear();
+            _melspectrogramBuffer.Clear();
+            _featureBuffer.Clear();
+            _rawRemainder.Clear();
+            _accumulatedSamples = 0;
+
+            for (int i = 0; i < 76; i++)
+            {
+                float[] row = new float[32];
+                for (int j = 0; j < row.Length; j++)
+                {
+                    row[j] = 1f;
+                }
+
+                _melspectrogramBuffer.Add(row);
+            }
+
+            short[] initialAudio = new short[16000 * 4];
+            var random = new Random(1);
+            for (int i = 0; i < initialAudio.Length; i++)
+            {
+                initialAudio[i] = (short)random.Next(-1000, 1000);
+            }
+
+            foreach (float[] embedding in GetEmbeddings(initialAudio))
+            {
+                _featureBuffer.Add(embedding);
+            }
+
+            TrimFeatureBuffer();
+        }
+
+        public int Process(short[] input)
+        {
+            int processedSamples = 0;
+            var audio = new List<short>();
+            if (_rawRemainder.Count > 0)
+            {
+                audio.AddRange(_rawRemainder);
+                _rawRemainder.Clear();
+            }
+
+            audio.AddRange(input);
+
+            if (_accumulatedSamples + audio.Count >= 1280)
+            {
+                int remainder = (_accumulatedSamples + audio.Count) % 1280;
+                int evenLength = audio.Count - remainder;
+                if (evenLength > 0)
+                {
+                    short[] even = audio.GetRange(0, evenLength).ToArray();
+                    _rawDataBuffer.AddRange(even);
+                    _accumulatedSamples += even.Length;
+                }
+
+                if (remainder > 0)
+                {
+                    _rawRemainder.AddRange(audio.GetRange(evenLength, remainder));
+                }
+            }
+            else
+            {
+                _rawDataBuffer.AddRange(audio);
+                _accumulatedSamples += audio.Count;
+            }
+
+            if (_accumulatedSamples >= 1280 && _accumulatedSamples % 1280 == 0)
+            {
+                StreamingMelspectrogram(_accumulatedSamples);
+
+                int chunks = _accumulatedSamples / 1280;
+                for (int i = chunks - 1; i >= 0; i--)
+                {
+                    int ndx = -8 * i;
+                    int end = ndx != 0 ? _melspectrogramBuffer.Count + ndx : _melspectrogramBuffer.Count;
+                    int start = end - 76;
+                    if (start >= 0 && end <= _melspectrogramBuffer.Count)
+                    {
+                        _featureBuffer.Add(GetEmbeddingFromMelspectrogram(start));
+                    }
+                }
+
+                processedSamples = _accumulatedSamples;
+                _accumulatedSamples = 0;
+            }
+
+            TrimFeatureBuffer();
+            return processedSamples != 0 ? processedSamples : _accumulatedSamples;
+        }
+
+        public float[] GetFeatures(int nFeatureFrames)
+        {
+            float[] result = new float[nFeatureFrames * 96];
+            int start = Math.Max(0, _featureBuffer.Count - nFeatureFrames);
+            int outputRow = 0;
+            for (int i = start; i < _featureBuffer.Count && outputRow < nFeatureFrames; i++, outputRow++)
+            {
+                Array.Copy(_featureBuffer[i], 0, result, outputRow * 96, 96);
+            }
+
+            return result;
+        }
+
+        public void Dispose()
+        {
+            _melspectrogramSession.Dispose();
+            _embeddingSession.Dispose();
+        }
+
+        private void StreamingMelspectrogram(int nSamples)
+        {
+            short[] raw = _rawDataBuffer.GetLast(nSamples + 160 * 3);
+            foreach (float[] row in GetMelspectrogram(raw))
+            {
+                _melspectrogramBuffer.Add(row);
+            }
+
+            while (_melspectrogramBuffer.Count > 10 * 97)
+            {
+                _melspectrogramBuffer.RemoveAt(0);
+            }
+        }
+
+        private List<float[]> GetMelspectrogram(short[] audio)
+        {
+            float[] input = new float[audio.Length];
+            for (int i = 0; i < audio.Length; i++)
+            {
+                input[i] = audio[i];
+            }
+
+            var tensor = new DenseTensor<float>(input, new[] { 1, audio.Length });
+            using (var results = _melspectrogramSession.Run(new[] { NamedOnnxValue.CreateFromTensor(_melspectrogramInputName, tensor) }))
+            {
+                Tensor<float> output = results.First().AsTensor<float>();
+                float[] values = output.ToArray();
+                int rows = values.Length / 32;
+                var spec = new List<float[]>();
+                for (int row = 0; row < rows; row++)
+                {
+                    float[] item = new float[32];
+                    for (int col = 0; col < 32; col++)
+                    {
+                        item[col] = values[row * 32 + col] / 10f + 2f;
+                    }
+
+                    spec.Add(item);
+                }
+
+                return spec;
+            }
+        }
+
+        private List<float[]> GetEmbeddings(short[] audio)
+        {
+            List<float[]> spec = GetMelspectrogram(audio);
+            var embeddings = new List<float[]>();
+            for (int start = 0; start + 76 <= spec.Count; start += 8)
+            {
+                embeddings.Add(GetEmbeddingFromMelspectrogram(spec, start));
+            }
+
+            return embeddings;
+        }
+
+        private float[] GetEmbeddingFromMelspectrogram(int start)
+        {
+            return GetEmbeddingFromMelspectrogram(_melspectrogramBuffer, start);
+        }
+
+        private float[] GetEmbeddingFromMelspectrogram(List<float[]> spec, int start)
+        {
+            float[] input = new float[76 * 32];
+            for (int row = 0; row < 76; row++)
+            {
+                Array.Copy(spec[start + row], 0, input, row * 32, 32);
+            }
+
+            var tensor = new DenseTensor<float>(input, new[] { 1, 76, 32, 1 });
+            using (var results = _embeddingSession.Run(new[] { NamedOnnxValue.CreateFromTensor(_embeddingInputName, tensor) }))
+            {
+                return results.First().AsEnumerable<float>().ToArray();
+            }
+        }
+
+        private void TrimFeatureBuffer()
+        {
+            while (_featureBuffer.Count > 120)
+            {
+                _featureBuffer.RemoveAt(0);
+            }
+        }
+
+        private static InferenceSession CreateSession(string path)
+        {
+            var options = new SessionOptions();
+            options.InterOpNumThreads = 1;
+            options.IntraOpNumThreads = 1;
+            return new InferenceSession(path, options);
+        }
+    }
+
+    internal sealed class RingBuffer<T>
+    {
+        private readonly T[] _buffer;
+        private int _start;
+        private int _count;
+
+        public RingBuffer(int capacity)
+        {
+            _buffer = new T[capacity];
+        }
+
+        public void Clear()
+        {
+            _start = 0;
+            _count = 0;
+        }
+
+        public void AddRange(IEnumerable<T> values)
+        {
+            foreach (T value in values)
+            {
+                Add(value);
+            }
+        }
+
+        public T[] GetLast(int count)
+        {
+            int actual = Math.Min(count, _count);
+            var result = new T[actual];
+            int start = (_start + _count - actual) % _buffer.Length;
+            for (int i = 0; i < actual; i++)
+            {
+                result[i] = _buffer[(start + i) % _buffer.Length];
+            }
+
+            return result;
+        }
+
+        private void Add(T value)
+        {
+            if (_count < _buffer.Length)
+            {
+                _buffer[(_start + _count) % _buffer.Length] = value;
+                _count++;
+                return;
+            }
+
+            _buffer[_start] = value;
+            _start = (_start + 1) % _buffer.Length;
+        }
+    }
+
+    internal sealed class AudioFrameEventArgs : EventArgs
+    {
+        public AudioFrameEventArgs(short[] samples)
+        {
+            Samples = samples;
+        }
+
+        public short[] Samples { get; private set; }
+    }
+
+    internal sealed class WaveInAudioSource : IDisposable
+    {
+        private const int WaveMapper = -1;
+        private const int BufferCount = 4;
+        private readonly int _deviceId;
+        private readonly int _sampleRate;
+        private readonly int _channels;
+        private readonly int _samplesPerBuffer;
+        private readonly List<WaveBuffer> _buffers = new List<WaveBuffer>();
+        private readonly object _sync = new object();
+        private WaveNative.WaveInProc _callback;
+        private IntPtr _handle;
+        private bool _running;
+        private bool _disposed;
+
+        public event EventHandler<AudioFrameEventArgs> AudioAvailable;
+
+        public WaveInAudioSource(int deviceId, int sampleRate, int channels, int samplesPerBuffer)
+        {
+            _deviceId = deviceId;
+            _sampleRate = sampleRate;
+            _channels = channels;
+            _samplesPerBuffer = samplesPerBuffer;
+            DeviceDescription = DescribeDevice(deviceId);
+        }
+
+        public bool IsRunning
+        {
+            get { return _running; }
+        }
+
+        public string DeviceDescription { get; private set; }
+
+        public void Start()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException("WaveInAudioSource");
+            }
+
+            _callback = OnWaveIn;
+            var format = new WaveNative.WaveFormatEx();
+            format.wFormatTag = 1;
+            format.nChannels = (short)_channels;
+            format.nSamplesPerSec = _sampleRate;
+            format.wBitsPerSample = 16;
+            format.nBlockAlign = (short)(_channels * format.wBitsPerSample / 8);
+            format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
+            format.cbSize = 0;
+
+            int result = WaveNative.waveInOpen(out _handle, _deviceId, ref format, _callback, IntPtr.Zero, WaveNative.CallbackFunction);
+            Check(result, "waveInOpen");
+
+            int bufferBytes = _samplesPerBuffer * format.nBlockAlign;
+            for (int i = 0; i < BufferCount; i++)
+            {
+                var buffer = new WaveBuffer(bufferBytes);
+                buffer.Prepare(_handle);
+                buffer.Add(_handle);
+                _buffers.Add(buffer);
+            }
+
+            Check(WaveNative.waveInStart(_handle), "waveInStart");
+            _running = true;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            lock (_sync)
+            {
+                _running = false;
+            }
+
+            if (_handle != IntPtr.Zero)
+            {
+                WaveNative.waveInReset(_handle);
+                foreach (WaveBuffer buffer in _buffers)
+                {
+                    buffer.Unprepare(_handle);
+                    buffer.Dispose();
+                }
+
+                _buffers.Clear();
+                WaveNative.waveInClose(_handle);
+                _handle = IntPtr.Zero;
+            }
+        }
+
+        public static int ParseDeviceId(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return WaveMapper;
+            }
+
+            int parsed;
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
+            {
+                return parsed;
+            }
+
+            return WaveMapper;
+        }
+
+        private void OnWaveIn(IntPtr hwi, int message, IntPtr instance, IntPtr waveHeader, IntPtr reserved)
+        {
+            if (message != WaveNative.WimData || waveHeader == IntPtr.Zero)
+            {
+                return;
+            }
+
+            bool shouldRequeue;
+            lock (_sync)
+            {
+                shouldRequeue = _running && !_disposed;
+            }
+
+            if (!shouldRequeue)
+            {
+                return;
+            }
+
+            WaveNative.WaveHdr header = (WaveNative.WaveHdr)Marshal.PtrToStructure(waveHeader, typeof(WaveNative.WaveHdr));
+            if (header.dwBytesRecorded > 0)
+            {
+                byte[] bytes = new byte[header.dwBytesRecorded];
+                Marshal.Copy(header.lpData, bytes, 0, bytes.Length);
+                short[] samples = new short[bytes.Length / 2];
+                Buffer.BlockCopy(bytes, 0, samples, 0, bytes.Length);
+
+                EventHandler<AudioFrameEventArgs> handler = AudioAvailable;
+                if (handler != null)
+                {
+                    handler(this, new AudioFrameEventArgs(samples));
+                }
+            }
+
+            if (shouldRequeue)
+            {
+                WaveNative.waveInAddBuffer(_handle, waveHeader, Marshal.SizeOf(typeof(WaveNative.WaveHdr)));
+            }
+        }
+
+        private static string DescribeDevice(int deviceId)
+        {
+            if (deviceId == WaveMapper)
+            {
+                return "default";
+            }
+
+            var caps = new WaveNative.WaveInCaps();
+            int result = WaveNative.waveInGetDevCaps((IntPtr)deviceId, ref caps, Marshal.SizeOf(typeof(WaveNative.WaveInCaps)));
+            return result == 0 ? deviceId + ":" + caps.szPname : deviceId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static void Check(int result, string operation)
+        {
+            if (result != 0)
+            {
+                throw new InvalidOperationException(operation + " failed with code " + result.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
+        private sealed class WaveBuffer : IDisposable
+        {
+            private readonly int _headerSize = Marshal.SizeOf(typeof(WaveNative.WaveHdr));
+            private IntPtr _header;
+            private IntPtr _data;
+            private bool _prepared;
+
+            public WaveBuffer(int byteLength)
+            {
+                _data = Marshal.AllocHGlobal(byteLength);
+                _header = Marshal.AllocHGlobal(_headerSize);
+                var header = new WaveNative.WaveHdr();
+                header.lpData = _data;
+                header.dwBufferLength = byteLength;
+                header.dwBytesRecorded = 0;
+                header.dwUser = IntPtr.Zero;
+                header.dwFlags = 0;
+                header.dwLoops = 0;
+                header.lpNext = IntPtr.Zero;
+                header.reserved = IntPtr.Zero;
+                Marshal.StructureToPtr(header, _header, false);
+            }
+
+            public void Prepare(IntPtr handle)
+            {
+                Check(WaveNative.waveInPrepareHeader(handle, _header, _headerSize), "waveInPrepareHeader");
+                _prepared = true;
+            }
+
+            public void Add(IntPtr handle)
+            {
+                Check(WaveNative.waveInAddBuffer(handle, _header, _headerSize), "waveInAddBuffer");
+            }
+
+            public void Unprepare(IntPtr handle)
+            {
+                if (_prepared)
+                {
+                    WaveNative.waveInUnprepareHeader(handle, _header, _headerSize);
+                    _prepared = false;
+                }
+            }
+
+            public void Dispose()
+            {
+                if (_header != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_header);
+                    _header = IntPtr.Zero;
+                }
+
+                if (_data != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_data);
+                    _data = IntPtr.Zero;
+                }
+            }
+        }
+    }
+
     internal sealed class WindowCandidate
     {
         public IntPtr Handle;
@@ -1704,8 +2491,10 @@ namespace VoiceChatLauncher
         public int CooldownMilliseconds = 4000;
         public string OpenWakeWordPythonPath = @"..\.venv\Scripts\python.exe";
         public string OpenWakeWordScriptPath = @"..\scripts\openwakeword_listener.py";
-        public string OpenWakeWordModels = "hey_jarvis";
-        public float OpenWakeWordThreshold = 0.5f;
+        public string OpenWakeWordModels = @"..\models\Hey_Lucy_20260609_095011.onnx";
+        public string OpenWakeWordMelspectrogramModelPath = @"..\models\melspectrogram.onnx";
+        public string OpenWakeWordEmbeddingModelPath = @"..\models\embedding_model.onnx";
+        public float OpenWakeWordThreshold = 0.8f;
         public string OpenWakeWordDevice = string.Empty;
         public float OpenWakeWordVadThreshold = 0.0f;
         public bool OpenWakeWordLogScores = false;
@@ -1807,9 +2596,9 @@ namespace VoiceChatLauncher
             builder.AppendLine();
             builder.AppendLine("# Voice settings. Edit from the tray Settings screen or update this file directly.");
             AppendValue(builder, "ListenEngine", ListenEngine);
-            AppendValue(builder, "OpenWakeWordPythonPath", OpenWakeWordPythonPath);
-            AppendValue(builder, "OpenWakeWordScriptPath", OpenWakeWordScriptPath);
             AppendValue(builder, "OpenWakeWordModels", OpenWakeWordModels);
+            AppendValue(builder, "OpenWakeWordMelspectrogramModelPath", OpenWakeWordMelspectrogramModelPath);
+            AppendValue(builder, "OpenWakeWordEmbeddingModelPath", OpenWakeWordEmbeddingModelPath);
             AppendValue(builder, "OpenWakeWordThreshold", FormatFloat(OpenWakeWordThreshold));
             AppendValue(builder, "OpenWakeWordDevice", OpenWakeWordDevice);
             AppendValue(builder, "OpenWakeWordVadThreshold", FormatFloat(OpenWakeWordVadThreshold));
@@ -1897,6 +2686,14 @@ namespace VoiceChatLauncher
             else if (EqualsKey(key, "OpenWakeWordModels"))
             {
                 config.OpenWakeWordModels = value;
+            }
+            else if (EqualsKey(key, "OpenWakeWordMelspectrogramModelPath"))
+            {
+                config.OpenWakeWordMelspectrogramModelPath = value;
+            }
+            else if (EqualsKey(key, "OpenWakeWordEmbeddingModelPath"))
+            {
+                config.OpenWakeWordEmbeddingModelPath = value;
             }
             else if (EqualsKey(key, "OpenWakeWordThreshold"))
             {
@@ -2094,11 +2891,11 @@ namespace VoiceChatLauncher
 
 # The words or phrases that trigger ChatGPT voice mode.
 # ListenEngine=openwakeword uses OpenWakeWord and ignores Keywords.
-# Say ""hey jarvis"" by default. Other built-in models include alexa, hey_mycroft, hey_rhasspy, timer, weather.
+# Say ""Hey Lucy"" by default. Other built-in models include alexa, hey_jarvis, hey_mycroft, hey_rhasspy, timer, weather.
 ListenEngine=openwakeword
-OpenWakeWordPythonPath=..\.venv\Scripts\python.exe
-OpenWakeWordScriptPath=..\scripts\openwakeword_listener.py
-OpenWakeWordModels=hey_jarvis
+OpenWakeWordModels=..\models\Hey_Lucy_20260609_095011.onnx
+OpenWakeWordMelspectrogramModelPath=..\models\melspectrogram.onnx
+OpenWakeWordEmbeddingModelPath=..\models\embedding_model.onnx
 OpenWakeWordThreshold=0.80
 OpenWakeWordDevice=
 OpenWakeWordVadThreshold=0.0
@@ -2141,6 +2938,76 @@ CoordinateFallbackRightOffset=20
 CoordinateFallbackBottomOffset=70
 ButtonTimeoutMilliseconds=15000
 ";
+        }
+    }
+
+    internal static class WaveNative
+    {
+        public const int CallbackFunction = 0x00030000;
+        public const int WimData = 0x3C0;
+
+        public delegate void WaveInProc(IntPtr hwi, int uMsg, IntPtr dwInstance, IntPtr dwParam1, IntPtr dwParam2);
+
+        [DllImport("winmm.dll")]
+        public static extern int waveInOpen(out IntPtr hWaveIn, int uDeviceID, ref WaveFormatEx lpFormat, WaveInProc dwCallback, IntPtr dwInstance, int dwFlags);
+
+        [DllImport("winmm.dll")]
+        public static extern int waveInPrepareHeader(IntPtr hWaveIn, IntPtr lpWaveInHdr, int uSize);
+
+        [DllImport("winmm.dll")]
+        public static extern int waveInUnprepareHeader(IntPtr hWaveIn, IntPtr lpWaveInHdr, int uSize);
+
+        [DllImport("winmm.dll")]
+        public static extern int waveInAddBuffer(IntPtr hWaveIn, IntPtr lpWaveInHdr, int uSize);
+
+        [DllImport("winmm.dll")]
+        public static extern int waveInStart(IntPtr hWaveIn);
+
+        [DllImport("winmm.dll")]
+        public static extern int waveInReset(IntPtr hWaveIn);
+
+        [DllImport("winmm.dll")]
+        public static extern int waveInClose(IntPtr hWaveIn);
+
+        [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+        public static extern int waveInGetDevCaps(IntPtr uDeviceID, ref WaveInCaps pwic, int cbwic);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WaveFormatEx
+        {
+            public short wFormatTag;
+            public short nChannels;
+            public int nSamplesPerSec;
+            public int nAvgBytesPerSec;
+            public short nBlockAlign;
+            public short wBitsPerSample;
+            public short cbSize;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WaveHdr
+        {
+            public IntPtr lpData;
+            public int dwBufferLength;
+            public int dwBytesRecorded;
+            public IntPtr dwUser;
+            public int dwFlags;
+            public int dwLoops;
+            public IntPtr lpNext;
+            public IntPtr reserved;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        public struct WaveInCaps
+        {
+            public short wMid;
+            public short wPid;
+            public int vDriverVersion;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string szPname;
+            public int dwFormats;
+            public short wChannels;
+            public short wReserved1;
         }
     }
 

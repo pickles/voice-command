@@ -1,7 +1,17 @@
 .venv/
 .pip-cache/
 .git-codex/
+packages/
+src/VoiceChatLauncher/obj/
 bin/
+models/alexa_v0.1.onnx
+models/embedding_model.onnx
+models/hey_jarvis_v0.1.onnx
+models/hey_mycroft_v0.1.onnx
+models/hey_rhasspy_v0.1.onnx
+models/melspectrogram.onnx
+models/timer_v0.1.onnx
+models/weather_v0.1.onnx
 *.log
 *.out
 *.err
