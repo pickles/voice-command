@@ -1385,7 +1385,7 @@ namespace VoiceChatLauncher
             var tab = new TabPage("OpenWakeWord");
             var panel = CreateFormPanel();
 
-            _openWakeWordModelsBox = AddTextBox(panel, "モデル", "例: hey_jarvis または ..\\models\\wakeword.onnx");
+            _openWakeWordModelsBox = AddTextBox(panel, "モデル", "例: ..\\models\\Hey_Lucy_20260609_095011.onnx");
             _openWakeWordMelspectrogramModelPathBox = AddTextBox(panel, "Melモデル", "例: ..\\models\\melspectrogram.onnx");
             _openWakeWordEmbeddingModelPathBox = AddTextBox(panel, "Embeddingモデル", "例: ..\\models\\embedding_model.onnx");
             _openWakeWordThresholdBox = AddDecimalBox(panel, "しきい値", 0, 1, 2, 0.01m);
@@ -2489,8 +2489,6 @@ namespace VoiceChatLauncher
         public float MinimumConfidence = 0.72f;
         public bool EnableDictationFallback = true;
         public int CooldownMilliseconds = 4000;
-        public string OpenWakeWordPythonPath = @"..\.venv\Scripts\python.exe";
-        public string OpenWakeWordScriptPath = @"..\scripts\openwakeword_listener.py";
         public string OpenWakeWordModels = @"..\models\Hey_Lucy_20260609_095011.onnx";
         public string OpenWakeWordMelspectrogramModelPath = @"..\models\melspectrogram.onnx";
         public string OpenWakeWordEmbeddingModelPath = @"..\models\embedding_model.onnx";
@@ -2674,14 +2672,6 @@ namespace VoiceChatLauncher
             else if (EqualsKey(key, "EnableDictationFallback"))
             {
                 config.EnableDictationFallback = ParseBool(value, config.EnableDictationFallback);
-            }
-            else if (EqualsKey(key, "OpenWakeWordPythonPath"))
-            {
-                config.OpenWakeWordPythonPath = value;
-            }
-            else if (EqualsKey(key, "OpenWakeWordScriptPath"))
-            {
-                config.OpenWakeWordScriptPath = value;
             }
             else if (EqualsKey(key, "OpenWakeWordModels"))
             {
@@ -2891,7 +2881,7 @@ namespace VoiceChatLauncher
 
 # The words or phrases that trigger ChatGPT voice mode.
 # ListenEngine=openwakeword uses OpenWakeWord and ignores Keywords.
-# Say ""Hey Lucy"" by default. Other built-in models include alexa, hey_jarvis, hey_mycroft, hey_rhasspy, timer, weather.
+# Say ""Hey Lucy"" by default.
 ListenEngine=openwakeword
 OpenWakeWordModels=..\models\Hey_Lucy_20260609_095011.onnx
 OpenWakeWordMelspectrogramModelPath=..\models\melspectrogram.onnx

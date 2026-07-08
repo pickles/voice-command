@@ -2,12 +2,11 @@
 
 ## Project Overview
 
-Voice Chat Launcher is a Windows tray application that listens for a wake word and opens the ChatGPT Windows app voice mode. The main app is a .NET Framework WinForms executable built directly with `csc.exe`; there is no `.csproj`.
+Voice Chat Launcher is a Windows tray application that listens for a wake word and opens the ChatGPT Windows app voice mode. The main app is a .NET Framework WinForms executable built directly with `csc.exe`; there is no application `.csproj`. A small dependency `.csproj` exists only for NuGet restore.
 
 Important paths:
 
 - `src/VoiceChatLauncher/Program.cs`: main application, tray UI, settings UI, config parsing, ChatGPT window automation.
-- `scripts/openwakeword_listener.py`: OpenWakeWord listener process launched by the app.
 - `config.example.ini`: default user-facing configuration copied to `bin/config.ini` on first build.
 - `build.ps1`: canonical build command.
 - `diagnose.ps1`: local diagnostics for speech recognizers and ChatGPT app registration.
@@ -24,17 +23,7 @@ Use these commands from the repository root:
 
 `.\build.ps1` writes `bin\VoiceChatLauncher.exe`. If the app is already running, the build can fail because the exe is locked. Stop `VoiceChatLauncher.exe` before rebuilding when needed.
 
-For OpenWakeWord device checks:
-
-```powershell
-.\.venv\Scripts\python.exe .\scripts\openwakeword_listener.py --list-devices
-```
-
-For direct wake-word testing:
-
-```powershell
-.\.venv\Scripts\python.exe .\scripts\openwakeword_listener.py --models .\models\Hey_Lucy_20260609_095011.onnx --threshold 0.80 --log-scores
-```
+`.\setup_openwakeword.ps1` restores ONNX Runtime packages and downloads the OpenWakeWord feature models required by the C# runtime.
 
 ## Working Tree Rules
 
@@ -62,7 +51,7 @@ Before finishing code changes, run:
 
 If `bin\VoiceChatLauncher.exe` is locked by a running app and stopping it is not appropriate, compile to a temporary output path with the same references as `build.ps1` and report that the normal output was locked.
 
-For changes that affect wake-word behavior, also run the relevant Python listener command when dependencies are installed. For changes that affect ChatGPT window detection or button clicking, prefer validating with `diagnose.ps1` and manual app testing because UI Automation depends on the installed ChatGPT app and current UI.
+For changes that affect wake-word behavior, run `.\build.ps1` and prefer manual app testing with `OpenWakeWordLogScores=true` because microphone capture and UI Automation depend on local OS state. For changes that affect ChatGPT window detection or button clicking, prefer validating with `diagnose.ps1` and manual app testing because UI Automation depends on the installed ChatGPT app and current UI.
 
 ## Git and GitHub
 

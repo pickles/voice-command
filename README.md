@@ -77,25 +77,11 @@ bin\config.ini
 
 OpenWakeWord は C# runtime で動作します。Python や `.venv` は不要です。
 
-標準で使える WakeWord は `hey_jarvis`, `alexa`, `hey_mycroft`, `hey_rhasspy`, `timer`, `weather` です。初回セットアップで必要な ONNX モデルを `models` フォルダにダウンロードします。
+初回セットアップで、C# runtime が特徴量生成に使う `melspectrogram.onnx` と `embedding_model.onnx` を `models` フォルダにダウンロードします。
 
 このリポジトリでは `models\Hey_Lucy_20260609_095011.onnx` を使う設定になっています。
 
 ### WakeWord を変更する
-
-標準モデルを使う場合は、`bin\config.ini` の `OpenWakeWordModels` をモデル名に変更します。
-
-```ini
-OpenWakeWordModels=hey_jarvis
-```
-
-複数モデルを同時に待ち受ける場合は `|` で区切ります。
-
-```ini
-OpenWakeWordModels=hey_jarvis|alexa
-```
-
-### ONNX ファイルを追加する
 
 OpenWakeWord 用に作成された `.onnx` ファイルを `models` フォルダに置きます。
 
@@ -113,6 +99,12 @@ OpenWakeWordModels=..\models\my_wakeword.onnx
 
 ```ini
 OpenWakeWordModels=C:\path\to\my_wakeword.onnx
+```
+
+複数モデルを同時に待ち受ける場合は `|` で区切ります。
+
+```ini
+OpenWakeWordModels=..\models\my_wakeword.onnx|..\models\other_wakeword.onnx
 ```
 
 ### 反応しやすさを調整する
