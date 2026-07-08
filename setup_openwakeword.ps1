@@ -26,11 +26,5 @@ function Save-Model($FileName) {
 
 Save-Model "melspectrogram.onnx"
 Save-Model "embedding_model.onnx"
-Save-Model "alexa_v0.1.onnx"
-Save-Model "hey_jarvis_v0.1.onnx"
-Save-Model "hey_mycroft_v0.1.onnx"
-Save-Model "hey_rhasspy_v0.1.onnx"
-Save-Model "timer_v0.1.onnx"
-Save-Model "weather_v0.1.onnx"
 
 Write-Host "OpenWakeWord C# runtime is ready."
