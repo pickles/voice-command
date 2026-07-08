@@ -48,7 +48,10 @@ bin\config.ini
 
 ## 設定
 
-ビルド後の設定は `bin\config.ini` で変更できます。
+起動後、タスクトレイの Voice Chat Launcher アイコンを右クリックして `設定` を開くと、音声関連の設定を変更できます。
+保存すると `bin\config.ini` に反映され、待ち受けが新しい設定で再起動します。
+
+詳細な設定は `bin\config.ini` でも変更できます。
 
 - `ListenEngine`: `openwakeword` なら OpenWakeWord、`windows` なら従来の Windows 音声認識を使います。
 - `OpenWakeWordModels`: 待ち受けるモデルです。標準では `..\models\Hey_Lucy_20260609_095011.onnx` です。

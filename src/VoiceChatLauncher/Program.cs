@@ -31,6 +31,7 @@ namespace VoiceChatLauncher
         private readonly string _configPath;
         private readonly string _logPath;
         private NotifyIcon _notifyIcon;
+        private SettingsForm _settingsForm;
         private AppConfig _config;
         private SpeechRecognitionEngine _recognizer;
         private Process _wakeWordProcess;
@@ -56,7 +57,7 @@ namespace VoiceChatLauncher
             menu.MenuItems.Add("状態を表示", delegate { ShowStatus(); });
             menu.MenuItems.Add("今すぐ起動", delegate { TriggerAction("tray"); });
             menu.MenuItems.Add("-");
-            menu.MenuItems.Add("設定を開く", delegate { OpenConfig(); });
+            menu.MenuItems.Add("設定", delegate { OpenConfig(); });
             menu.MenuItems.Add("設定を再読み込み", delegate { Reload(); });
             menu.MenuItems.Add("-");
             menu.MenuItems.Add("終了", delegate { ExitThread(); });
@@ -1200,11 +1201,37 @@ namespace VoiceChatLauncher
 
         private void OpenConfig()
         {
-            Process.Start(new ProcessStartInfo
+            if (_settingsForm != null && !_settingsForm.IsDisposed)
             {
-                FileName = _configPath,
-                UseShellExecute = true
-            });
+                _settingsForm.Activate();
+                return;
+            }
+
+            try
+            {
+                _settingsForm = new SettingsForm(AppConfig.Load(_configPath), _configPath);
+                _settingsForm.FormClosed += delegate(object sender, FormClosedEventArgs e)
+                {
+                    var form = sender as SettingsForm;
+                    if (form != null && form.SettingsSaved)
+                    {
+                        Reload();
+                    }
+
+                    _settingsForm = null;
+                };
+                _settingsForm.Show();
+                _settingsForm.Activate();
+            }
+            catch (Exception ex)
+            {
+                Log("Failed to open settings window: " + ex);
+                MessageBox.Show(
+                    ShortMessage(ex),
+                    "設定を開けません",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
 
         private void ShowBalloon(string title, string text)
@@ -1306,6 +1333,337 @@ namespace VoiceChatLauncher
             }
 
             base.ExitThreadCore();
+        }
+    }
+
+    internal sealed class SettingsForm : Form
+    {
+        private readonly AppConfig _config;
+        private readonly string _configPath;
+        private ComboBox _listenEngineBox;
+        private TextBox _openWakeWordPythonPathBox;
+        private TextBox _openWakeWordScriptPathBox;
+        private TextBox _openWakeWordModelsBox;
+        private NumericUpDown _openWakeWordThresholdBox;
+        private TextBox _openWakeWordDeviceBox;
+        private NumericUpDown _openWakeWordVadThresholdBox;
+        private CheckBox _openWakeWordLogScoresBox;
+        private TextBox _keywordsBox;
+        private TextBox _cultureBox;
+        private NumericUpDown _minimumConfidenceBox;
+        private CheckBox _enableDictationFallbackBox;
+        private NumericUpDown _cooldownMillisecondsBox;
+
+        public bool SettingsSaved { get; private set; }
+
+        public SettingsForm(AppConfig config, string configPath)
+        {
+            _config = config;
+            _configPath = configPath;
+
+            Text = "Voice Chat Launcher 設定";
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ClientSize = new System.Drawing.Size(560, 560);
+
+            BuildUi();
+            LoadValues();
+        }
+
+        private void BuildUi()
+        {
+            var root = new TableLayoutPanel();
+            root.Dock = DockStyle.Fill;
+            root.Padding = new Padding(12);
+            root.RowCount = 3;
+            root.ColumnCount = 1;
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var enginePanel = new TableLayoutPanel();
+            enginePanel.Dock = DockStyle.Top;
+            enginePanel.ColumnCount = 2;
+            enginePanel.RowCount = 1;
+            enginePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+            enginePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            enginePanel.Controls.Add(CreateLabel("音声認識エンジン"), 0, 0);
+            _listenEngineBox = new ComboBox();
+            _listenEngineBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            _listenEngineBox.Items.Add("openwakeword");
+            _listenEngineBox.Items.Add("windows");
+            _listenEngineBox.Dock = DockStyle.Fill;
+            enginePanel.Controls.Add(_listenEngineBox, 1, 0);
+
+            var tabs = new TabControl();
+            tabs.Dock = DockStyle.Fill;
+            tabs.TabPages.Add(CreateOpenWakeWordTab());
+            tabs.TabPages.Add(CreateWindowsSpeechTab());
+
+            var buttons = new FlowLayoutPanel();
+            buttons.FlowDirection = FlowDirection.RightToLeft;
+            buttons.Dock = DockStyle.Fill;
+            buttons.AutoSize = true;
+            buttons.Padding = new Padding(0, 8, 0, 0);
+
+            var cancelButton = new Button();
+            cancelButton.Text = "キャンセル";
+            cancelButton.DialogResult = DialogResult.Cancel;
+            cancelButton.Width = 96;
+
+            var saveButton = new Button();
+            saveButton.Text = "保存";
+            saveButton.Width = 96;
+            saveButton.Click += delegate { SaveSettings(); };
+
+            buttons.Controls.Add(cancelButton);
+            buttons.Controls.Add(saveButton);
+
+            root.Controls.Add(enginePanel, 0, 0);
+            root.Controls.Add(tabs, 0, 1);
+            root.Controls.Add(buttons, 0, 2);
+
+            AcceptButton = saveButton;
+            CancelButton = cancelButton;
+            Controls.Add(root);
+        }
+
+        private TabPage CreateOpenWakeWordTab()
+        {
+            var tab = new TabPage("OpenWakeWord");
+            var panel = CreateFormPanel();
+
+            _openWakeWordModelsBox = AddTextBox(panel, "モデル", "例: hey_jarvis または ..\\models\\wakeword.onnx");
+            _openWakeWordThresholdBox = AddDecimalBox(panel, "しきい値", 0, 1, 2, 0.01m);
+            _openWakeWordDeviceBox = AddTextBox(panel, "マイクデバイス", "空なら既定のマイク");
+            _openWakeWordVadThresholdBox = AddDecimalBox(panel, "VADしきい値", 0, 1, 2, 0.01m);
+            _openWakeWordLogScoresBox = AddCheckBox(panel, "スコアをログ出力する");
+            _openWakeWordPythonPathBox = AddTextBox(panel, "Pythonパス", "例: ..\\.venv\\Scripts\\python.exe");
+            _openWakeWordScriptPathBox = AddTextBox(panel, "スクリプトパス", "例: ..\\scripts\\openwakeword_listener.py");
+
+            tab.Controls.Add(panel);
+            return tab;
+        }
+
+        private TabPage CreateWindowsSpeechTab()
+        {
+            var tab = new TabPage("Windows 音声認識");
+            var panel = CreateFormPanel();
+
+            _keywordsBox = AddMultilineTextBox(panel, "合図", "| 区切りで複数指定できます");
+            _cultureBox = AddTextBox(panel, "認識言語", "例: ja-JP。空なら既定");
+            _minimumConfidenceBox = AddDecimalBox(panel, "最低信頼度", 0, 1, 2, 0.01m);
+            _enableDictationFallbackBox = AddCheckBox(panel, "自由認識から合図を探す");
+            _cooldownMillisecondsBox = AddIntBox(panel, "クールダウン(ms)", 0, 60000, 100);
+
+            tab.Controls.Add(panel);
+            return tab;
+        }
+
+        private static TableLayoutPanel CreateFormPanel()
+        {
+            var panel = new TableLayoutPanel();
+            panel.Dock = DockStyle.Fill;
+            panel.Padding = new Padding(12);
+            panel.AutoScroll = true;
+            panel.ColumnCount = 2;
+            panel.RowCount = 0;
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            return panel;
+        }
+
+        private static Label CreateLabel(string text)
+        {
+            var label = new Label();
+            label.Text = text;
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Dock = DockStyle.Fill;
+            label.AutoSize = true;
+            label.Margin = new Padding(0, 6, 8, 6);
+            return label;
+        }
+
+        private static TextBox AddTextBox(TableLayoutPanel panel, string label, string placeholder)
+        {
+            var box = new TextBox();
+            box.Dock = DockStyle.Fill;
+            box.Margin = new Padding(0, 4, 0, 4);
+            box.Tag = placeholder;
+            AddRow(panel, label, box);
+            return box;
+        }
+
+        private static TextBox AddMultilineTextBox(TableLayoutPanel panel, string label, string placeholder)
+        {
+            var box = new TextBox();
+            box.Dock = DockStyle.Fill;
+            box.Margin = new Padding(0, 4, 0, 4);
+            box.Multiline = true;
+            box.Height = 72;
+            box.ScrollBars = ScrollBars.Vertical;
+            box.Tag = placeholder;
+            AddRow(panel, label, box);
+            return box;
+        }
+
+        private static NumericUpDown AddDecimalBox(TableLayoutPanel panel, string label, decimal minimum, decimal maximum, int decimalPlaces, decimal increment)
+        {
+            var box = new NumericUpDown();
+            box.Dock = DockStyle.Left;
+            box.Minimum = minimum;
+            box.Maximum = maximum;
+            box.DecimalPlaces = decimalPlaces;
+            box.Increment = increment;
+            box.Width = 120;
+            box.Margin = new Padding(0, 4, 0, 4);
+            AddRow(panel, label, box);
+            return box;
+        }
+
+        private static NumericUpDown AddIntBox(TableLayoutPanel panel, string label, int minimum, int maximum, int increment)
+        {
+            var box = new NumericUpDown();
+            box.Dock = DockStyle.Left;
+            box.Minimum = minimum;
+            box.Maximum = maximum;
+            box.Increment = increment;
+            box.Width = 120;
+            box.Margin = new Padding(0, 4, 0, 4);
+            AddRow(panel, label, box);
+            return box;
+        }
+
+        private static CheckBox AddCheckBox(TableLayoutPanel panel, string label)
+        {
+            var box = new CheckBox();
+            box.Dock = DockStyle.Fill;
+            box.Text = label;
+            box.Margin = new Padding(0, 6, 0, 6);
+            AddRow(panel, string.Empty, box);
+            return box;
+        }
+
+        private static void AddRow(TableLayoutPanel panel, string label, Control control)
+        {
+            int row = panel.RowCount++;
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.Controls.Add(CreateLabel(label), 0, row);
+            panel.Controls.Add(control, 1, row);
+        }
+
+        private void LoadValues()
+        {
+            _listenEngineBox.SelectedItem = _config.UseOpenWakeWord ? "openwakeword" : "windows";
+            _openWakeWordPythonPathBox.Text = _config.OpenWakeWordPythonPath;
+            _openWakeWordScriptPathBox.Text = _config.OpenWakeWordScriptPath;
+            _openWakeWordModelsBox.Text = _config.OpenWakeWordModels;
+            _openWakeWordThresholdBox.Value = ClampDecimal((decimal)_config.OpenWakeWordThreshold, _openWakeWordThresholdBox.Minimum, _openWakeWordThresholdBox.Maximum);
+            _openWakeWordDeviceBox.Text = _config.OpenWakeWordDevice;
+            _openWakeWordVadThresholdBox.Value = ClampDecimal((decimal)_config.OpenWakeWordVadThreshold, _openWakeWordVadThresholdBox.Minimum, _openWakeWordVadThresholdBox.Maximum);
+            _openWakeWordLogScoresBox.Checked = _config.OpenWakeWordLogScores;
+
+            _keywordsBox.Text = string.Join("|", _config.Keywords.ToArray());
+            _cultureBox.Text = _config.Culture;
+            _minimumConfidenceBox.Value = ClampDecimal((decimal)_config.MinimumConfidence, _minimumConfidenceBox.Minimum, _minimumConfidenceBox.Maximum);
+            _enableDictationFallbackBox.Checked = _config.EnableDictationFallback;
+            _cooldownMillisecondsBox.Value = ClampDecimal(_config.CooldownMilliseconds, _cooldownMillisecondsBox.Minimum, _cooldownMillisecondsBox.Maximum);
+        }
+
+        private void SaveSettings()
+        {
+            try
+            {
+                string listenEngine = Convert.ToString(_listenEngineBox.SelectedItem, CultureInfo.InvariantCulture);
+                if (string.IsNullOrWhiteSpace(listenEngine))
+                {
+                    listenEngine = "openwakeword";
+                }
+
+                string models = _openWakeWordModelsBox.Text.Trim();
+                string keywords = _keywordsBox.Text.Trim();
+
+                if (string.Equals(listenEngine, "openwakeword", StringComparison.OrdinalIgnoreCase) && models.Length == 0)
+                {
+                    ShowValidationError("OpenWakeWord のモデルを入力してください。");
+                    return;
+                }
+
+                if (string.Equals(listenEngine, "windows", StringComparison.OrdinalIgnoreCase) && SplitList(keywords).Count == 0)
+                {
+                    ShowValidationError("Windows 音声認識の合図を1つ以上入力してください。");
+                    return;
+                }
+
+                _config.ListenEngine = listenEngine;
+                _config.OpenWakeWordPythonPath = _openWakeWordPythonPathBox.Text.Trim();
+                _config.OpenWakeWordScriptPath = _openWakeWordScriptPathBox.Text.Trim();
+                _config.OpenWakeWordModels = models;
+                _config.OpenWakeWordThreshold = (float)_openWakeWordThresholdBox.Value;
+                _config.OpenWakeWordDevice = _openWakeWordDeviceBox.Text.Trim();
+                _config.OpenWakeWordVadThreshold = (float)_openWakeWordVadThresholdBox.Value;
+                _config.OpenWakeWordLogScores = _openWakeWordLogScoresBox.Checked;
+
+                _config.Keywords = SplitList(keywords);
+                _config.Culture = _cultureBox.Text.Trim();
+                _config.MinimumConfidence = (float)_minimumConfidenceBox.Value;
+                _config.EnableDictationFallback = _enableDictationFallbackBox.Checked;
+                _config.CooldownMilliseconds = (int)_cooldownMillisecondsBox.Value;
+
+                _config.Save(_configPath);
+                SettingsSaved = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "設定を保存できません",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private static decimal ClampDecimal(decimal value, decimal minimum, decimal maximum)
+        {
+            if (value < minimum)
+            {
+                return minimum;
+            }
+
+            if (value > maximum)
+            {
+                return maximum;
+            }
+
+            return value;
+        }
+
+        private static List<string> SplitList(string value)
+        {
+            var list = new List<string>();
+            string[] parts = value.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string part in parts)
+            {
+                string trimmed = part.Trim();
+                if (trimmed.Length > 0)
+                {
+                    list.Add(trimmed);
+                }
+            }
+
+            return list;
+        }
+
+        private static void ShowValidationError(string message)
+        {
+            MessageBox.Show(
+                message,
+                "設定を確認してください",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
     }
 
@@ -1434,6 +1792,72 @@ namespace VoiceChatLauncher
             }
 
             return config;
+        }
+
+        public void Save(string path)
+        {
+            File.WriteAllText(path, ToConfigText(), Encoding.UTF8);
+        }
+
+        private string ToConfigText()
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine("# Voice Chat Launcher settings");
+            builder.AppendLine("# Separate multiple values with |");
+            builder.AppendLine();
+            builder.AppendLine("# Voice settings. Edit from the tray Settings screen or update this file directly.");
+            AppendValue(builder, "ListenEngine", ListenEngine);
+            AppendValue(builder, "OpenWakeWordPythonPath", OpenWakeWordPythonPath);
+            AppendValue(builder, "OpenWakeWordScriptPath", OpenWakeWordScriptPath);
+            AppendValue(builder, "OpenWakeWordModels", OpenWakeWordModels);
+            AppendValue(builder, "OpenWakeWordThreshold", FormatFloat(OpenWakeWordThreshold));
+            AppendValue(builder, "OpenWakeWordDevice", OpenWakeWordDevice);
+            AppendValue(builder, "OpenWakeWordVadThreshold", FormatFloat(OpenWakeWordVadThreshold));
+            AppendValue(builder, "OpenWakeWordLogScores", FormatBool(OpenWakeWordLogScores));
+            builder.AppendLine();
+            builder.AppendLine("# Legacy Windows Speech settings. Used only when ListenEngine=windows.");
+            AppendValue(builder, "Keywords", JoinList(Keywords));
+            AppendValue(builder, "Culture", Culture);
+            AppendValue(builder, "MinimumConfidence", FormatFloat(MinimumConfidence));
+            AppendValue(builder, "EnableDictationFallback", FormatBool(EnableDictationFallback));
+            AppendValue(builder, "CooldownMilliseconds", CooldownMilliseconds.ToString(CultureInfo.InvariantCulture));
+            builder.AppendLine();
+            builder.AppendLine("# LaunchCommand can be a URI such as chatgpt:, an .exe path, or shell:AppsFolder\\<AppID>.");
+            AppendValue(builder, "LaunchCommand", LaunchCommand);
+            AppendValue(builder, "LaunchArguments", LaunchArguments);
+            builder.AppendLine();
+            builder.AppendLine("# Used to find the ChatGPT window after launch.");
+            AppendValue(builder, "WindowTitleKeyword", WindowTitleKeyword);
+            AppendValue(builder, "ProcessNames", JoinList(ProcessNames));
+            AppendValue(builder, "MinimumWindowWidth", MinimumWindowWidth.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "MinimumWindowHeight", MinimumWindowHeight.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "CenterWindowOnForeground", FormatBool(CenterWindowOnForeground));
+            AppendValue(builder, "RunActionOnStartup", FormatBool(RunActionOnStartup));
+            AppendValue(builder, "StartupActionDelayMilliseconds", StartupActionDelayMilliseconds.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "StartupDelayMilliseconds", StartupDelayMilliseconds.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "AfterBringToFrontDelayMilliseconds", AfterBringToFrontDelayMilliseconds.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "WindowTimeoutMilliseconds", WindowTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture));
+            builder.AppendLine();
+            builder.AppendLine("# Used to find and press the voice conversation button, not the dictation button.");
+            AppendValue(builder, "VoiceButtonNames", JoinList(VoiceButtonNames));
+            AppendValue(builder, "ExcludedButtonNames", JoinList(ExcludedButtonNames));
+            AppendValue(builder, "RightmostVoiceButtonFallback", FormatBool(RightmostVoiceButtonFallback));
+            builder.AppendLine();
+            builder.AppendLine("# If ChatGPT does not expose button names, click the visual button position instead.");
+            AppendValue(builder, "CoordinateFallbackEnabled", FormatBool(CoordinateFallbackEnabled));
+            AppendValue(builder, "CoordinateFallbackMaxComposerWidth", CoordinateFallbackMaxComposerWidth.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "CoordinateFallbackHorizontalMargin", CoordinateFallbackHorizontalMargin.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "CoordinateFallbackRightOffset", CoordinateFallbackRightOffset.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "CoordinateFallbackBottomOffset", CoordinateFallbackBottomOffset.ToString(CultureInfo.InvariantCulture));
+            AppendValue(builder, "ButtonTimeoutMilliseconds", ButtonTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture));
+            return builder.ToString();
+        }
+
+        private static void AppendValue(StringBuilder builder, string key, string value)
+        {
+            builder.Append(key);
+            builder.Append('=');
+            builder.AppendLine(value ?? string.Empty);
         }
 
         private static void Apply(AppConfig config, string key, string value)
@@ -1626,6 +2050,25 @@ namespace VoiceChatLauncher
             return fallback;
         }
 
+        private static string FormatBool(bool value)
+        {
+            return value ? "true" : "false";
+        }
+
+        private static string FormatFloat(float value)
+        {
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private static string JoinList(List<string> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return string.Join("|", values.ToArray());
+        }
 
         private static List<string> SplitList(string value)
         {
