@@ -8,8 +8,8 @@ OpenWakeWord でウェイクワードを待ち受け、ChatGPT Windows アプリ
 - ChatGPT Windows アプリ
 - .NET Framework 4.x の C# コンパイラ
   - 通常は Windows に含まれる `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` を使います。
-- Python 3
-  - `setup_openwakeword.ps1` が `.venv` を作成し、OpenWakeWord などをインストールします。
+- .NET SDK
+  - `setup_openwakeword.ps1` と `build.ps1` が ONNX Runtime の NuGet パッケージを復元します。
 - マイク
   - Windows のマイク権限で、デスクトップアプリからのアクセスを許可してください。
 
@@ -55,6 +55,8 @@ bin\config.ini
 
 - `ListenEngine`: `openwakeword` なら OpenWakeWord、`windows` なら従来の Windows 音声認識を使います。
 - `OpenWakeWordModels`: 待ち受けるモデルです。標準では `..\models\Hey_Lucy_20260609_095011.onnx` です。
+- `OpenWakeWordMelspectrogramModelPath`: OpenWakeWord の特徴量生成に使う `melspectrogram.onnx` です。
+- `OpenWakeWordEmbeddingModelPath`: OpenWakeWord の特徴量生成に使う `embedding_model.onnx` です。
 - `OpenWakeWordThreshold`: 反応のしきい値です。誤反応が多い場合は上げ、反応しにくい場合は下げます。
 - `OpenWakeWordDevice`: マイクを明示指定したい場合にデバイス番号を入れます。
 - `Keywords`: Windows 音声認識を使う場合の合図です。複数指定は `|` で区切ります。
@@ -73,7 +75,9 @@ bin\config.ini
 
 ## OpenWakeWord
 
-標準で使える WakeWord は `hey_jarvis`, `alexa`, `hey_mycroft`, `hey_rhasspy`, `timer`, `weather` です。
+OpenWakeWord は C# runtime で動作します。Python や `.venv` は不要です。
+
+標準で使える WakeWord は `hey_jarvis`, `alexa`, `hey_mycroft`, `hey_rhasspy`, `timer`, `weather` です。初回セットアップで必要な ONNX モデルを `models` フォルダにダウンロードします。
 
 このリポジトリでは `models\Hey_Lucy_20260609_095011.onnx` を使う設定になっています。
 
@@ -120,21 +124,14 @@ OpenWakeWordThreshold=0.80
 - 反応しにくい場合は `0.70` などへ下げます。
 - 誤反応が多い場合は `0.90` などへ上げます。
 
-マイク一覧を確認したい場合:
+直接テストしたい場合は、設定画面で `スコアをログ出力する` を有効にして保存し、`bin\voice-command.log` の `SCORE` と `WAKE` 行を確認してください。
 
-```powershell
-.\.venv\Scripts\python.exe .\scripts\openwakeword_listener.py --list-devices
-```
-
-直接テストしたい場合:
-
-```powershell
-.\.venv\Scripts\python.exe .\scripts\openwakeword_listener.py --models .\models\Hey_Lucy_20260609_095011.onnx --threshold 0.80 --log-scores
-```
+`OpenWakeWordDevice` は Windows の waveIn デバイス番号です。空なら既定のマイクを使います。
 
 ## 注意
 
 - ChatGPT アプリにログイン済みで、マイク権限が許可されている必要があります。
 - Windows の「デスクトップ アプリがマイクにアクセスできるようにする」がオフだと待ち受けできません。
 - OpenWakeWord を使う場合、Windows の音声認識と言語パックは不要です。
+- C# runtime では `OpenWakeWordVadThreshold` はまだ使用されません。
 - ChatGPT アプリの画面構造が変わるとボタン検出に失敗する場合があります。その場合は `bin\voice-command.log` を見て、`VoiceButtonNames` や `WindowTitleKeyword` を調整してください。
