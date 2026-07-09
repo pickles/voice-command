@@ -29,9 +29,12 @@ namespace VoiceChatLauncher
 
     internal sealed class LauncherContext : ApplicationContext
     {
+        private const int LogRetentionHours = 24;
+        private static readonly TimeSpan LogRetentionSweepInterval = TimeSpan.FromMinutes(10);
         private readonly string _baseDirectory;
         private readonly string _configPath;
         private readonly string _logPath;
+        private readonly object _logSync = new object();
         private NotifyIcon _notifyIcon;
         private MenuItem _toggleListeningMenuItem;
         private SettingsForm _settingsForm;
@@ -39,6 +42,7 @@ namespace VoiceChatLauncher
         private OpenWakeWordListener _wakeWordListener;
         private bool _isListeningPaused;
         private bool _isRunningAction;
+        private DateTime _lastLogRetentionSweepUtc = DateTime.MinValue;
         private DateTime _lastTriggered = DateTime.MinValue;
 
         public LauncherContext()
@@ -47,6 +51,7 @@ namespace VoiceChatLauncher
             _configPath = Path.Combine(_baseDirectory, "config.ini");
             _logPath = Path.Combine(_baseDirectory, "voice-command.log");
 
+            ApplyLogRetention(DateTime.Now, true);
             InitializeTray();
             LoadConfiguration();
             StartListening();
@@ -1087,14 +1092,98 @@ namespace VoiceChatLauncher
         {
             try
             {
-                File.AppendAllText(
-                    _logPath,
-                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture) + " " + message + Environment.NewLine,
-                    Encoding.UTF8);
+                DateTime now = DateTime.Now;
+                string line = now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture) + " " + message + Environment.NewLine;
+                lock (_logSync)
+                {
+                    File.AppendAllText(_logPath, line, Encoding.UTF8);
+                    ApplyLogRetention(now, false);
+                }
             }
             catch
             {
             }
+        }
+
+        private void ApplyLogRetention(DateTime now, bool force)
+        {
+            try
+            {
+                DateTime utcNow = DateTime.UtcNow;
+                if (!force && utcNow - _lastLogRetentionSweepUtc < LogRetentionSweepInterval)
+                {
+                    return;
+                }
+
+                _lastLogRetentionSweepUtc = utcNow;
+                if (!File.Exists(_logPath))
+                {
+                    return;
+                }
+
+                string[] lines = File.ReadAllLines(_logPath, Encoding.UTF8);
+                if (lines.Length == 0)
+                {
+                    return;
+                }
+
+                DateTime cutoff = now.AddHours(-LogRetentionHours);
+                var retained = new List<string>(lines.Length);
+                bool removed = false;
+
+                foreach (string line in lines)
+                {
+                    if (ShouldKeepLogLine(line, cutoff))
+                    {
+                        retained.Add(line);
+                    }
+                    else
+                    {
+                        removed = true;
+                    }
+                }
+
+                if (!removed)
+                {
+                    return;
+                }
+
+                string content = retained.Count == 0
+                    ? string.Empty
+                    : string.Join(Environment.NewLine, retained.ToArray()) + Environment.NewLine;
+                File.WriteAllText(_logPath, content, Encoding.UTF8);
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool ShouldKeepLogLine(string line, DateTime cutoff)
+        {
+            DateTime timestamp;
+            if (!TryParseLogTimestamp(line, out timestamp))
+            {
+                return true;
+            }
+
+            return timestamp >= cutoff;
+        }
+
+        private static bool TryParseLogTimestamp(string line, out DateTime timestamp)
+        {
+            timestamp = DateTime.MinValue;
+            if (string.IsNullOrEmpty(line) || line.Length < 23)
+            {
+                return false;
+            }
+
+            string value = line.Substring(0, 23);
+            return DateTime.TryParseExact(
+                value,
+                "yyyy-MM-dd HH:mm:ss.fff",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out timestamp);
         }
 
         private static string SafeName(AutomationElement element)
