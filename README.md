@@ -54,6 +54,7 @@ bin\config.ini
 同じタスクトレイメニューから `音声認識を一時停止` を選ぶと待ち受けを止められます。一時停止中は音声コマンドを処理しません。再開する場合は `音声認識を再開` を選びます。`状態を表示` で現在の状態を確認できます。
 
 同じ内容は `bin\config.ini` を直接編集しても変更できます。
+ログは `bin\voice-command.log` に出力され、24時間より古い行は起動時と実行中に自動で削除されます。
 
 - `OpenWakeWordModels`: 待ち受けるモデルです。標準では `..\models\Hey_Lucy_20260609_095011.onnx` です。
 - `OpenWakeWordMelspectrogramModelPath`: OpenWakeWord の特徴量生成に使う `melspectrogram.onnx` です。
