@@ -8,7 +8,6 @@ $outDir = Join-Path $root "bin"
 $outExe = Join-Path $outDir "VoiceChatLauncher.exe"
 $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $gac = Join-Path $env:WINDIR "Microsoft.NET\assembly\GAC_MSIL"
-$systemSpeech = Get-ChildItem (Join-Path $gac "System.Speech") -Recurse -Filter "System.Speech.dll" | Select-Object -First 1 -ExpandProperty FullName
 $uiAutomationClient = Get-ChildItem (Join-Path $gac "UIAutomationClient") -Recurse -Filter "UIAutomationClient.dll" | Select-Object -First 1 -ExpandProperty FullName
 $uiAutomationTypes = Get-ChildItem (Join-Path $gac "UIAutomationTypes") -Recurse -Filter "UIAutomationTypes.dll" | Select-Object -First 1 -ExpandProperty FullName
 $windowsBase = Get-ChildItem (Join-Path $gac "WindowsBase") -Recurse -Filter "WindowsBase.dll" | Select-Object -First 1 -ExpandProperty FullName
@@ -48,7 +47,6 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
     /reference:$systemMemory `
     /reference:$systemBuffers `
     /reference:$systemUnsafe `
-    /reference:$systemSpeech `
     /reference:$uiAutomationClient `
     /reference:$uiAutomationTypes `
     /reference:$windowsBase `

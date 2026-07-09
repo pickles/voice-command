@@ -3,30 +3,6 @@ $ErrorActionPreference = "Continue"
 Write-Host "Voice Chat Launcher diagnostics"
 Write-Host ""
 
-Write-Host "Speech recognizers:"
-try {
-    Add-Type -AssemblyName System.Speech
-    $recognizers = [System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()
-    if ($recognizers.Count -eq 0) {
-        Write-Host "  None found"
-    } else {
-        foreach ($recognizer in $recognizers) {
-            $status = "usable"
-            try {
-                $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine($recognizer)
-                $engine.Dispose()
-            } catch {
-                $status = "listed but not usable: " + $_.Exception.Message
-            }
-
-            Write-Host ("  {0} ({1}) - {2}" -f $recognizer.Name, $recognizer.Culture.Name, $status)
-        }
-    }
-} catch {
-    Write-Host ("  Error: {0}" -f $_.Exception.Message)
-}
-
-Write-Host ""
 Write-Host "ChatGPT Start menu apps:"
 try {
     $apps = Get-StartApps | Where-Object {

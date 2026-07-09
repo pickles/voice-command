@@ -6,7 +6,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Speech.Recognition;
 using System.Text;
 using System.Threading;
 using System.Windows;
@@ -37,12 +36,10 @@ namespace VoiceChatLauncher
         private MenuItem _toggleListeningMenuItem;
         private SettingsForm _settingsForm;
         private AppConfig _config;
-        private SpeechRecognitionEngine _recognizer;
         private OpenWakeWordListener _wakeWordListener;
         private bool _isListeningPaused;
         private bool _isRunningAction;
         private DateTime _lastTriggered = DateTime.MinValue;
-        private DateTime _lastAudioLevelLog = DateTime.MinValue;
 
         public LauncherContext()
         {
@@ -121,101 +118,14 @@ namespace VoiceChatLauncher
                 return;
             }
 
-            if (_config.UseOpenWakeWord)
-            {
-                StartOpenWakeWordListening();
-                UpdateListeningUi();
-                return;
-            }
-
-            try
-            {
-                if (_config.Keywords.Count == 0)
-                {
-                    throw new InvalidOperationException("config.ini の Keywords が空です。");
-                }
-
-                RecognizerInfo recognizerInfo = FindRecognizer(_config.Culture);
-                _recognizer = recognizerInfo == null
-                    ? new SpeechRecognitionEngine()
-                    : new SpeechRecognitionEngine(recognizerInfo);
-
-                var choices = new Choices(_config.Keywords.ToArray());
-                var grammarBuilder = new GrammarBuilder(choices);
-                grammarBuilder.Culture = _recognizer.RecognizerInfo.Culture;
-
-                var grammar = new Grammar(grammarBuilder);
-                grammar.Name = "keywords";
-                _recognizer.LoadGrammar(grammar);
-                if (_config.EnableDictationFallback)
-                {
-                    try
-                    {
-                        var dictationGrammar = new DictationGrammar();
-                        dictationGrammar.Name = "dictation";
-                        _recognizer.LoadGrammar(dictationGrammar);
-                        Log("Dictation fallback enabled");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log("Failed to enable dictation fallback: " + ex.Message);
-                    }
-                }
-
-                _recognizer.SetInputToDefaultAudioDevice();
-                _recognizer.AudioLevelUpdated += OnAudioLevelUpdated;
-                _recognizer.AudioSignalProblemOccurred += OnAudioSignalProblemOccurred;
-                _recognizer.AudioStateChanged += OnAudioStateChanged;
-                _recognizer.SpeechDetected += OnSpeechDetected;
-                _recognizer.SpeechRecognized += OnSpeechRecognized;
-                _recognizer.SpeechRecognitionRejected += OnSpeechRecognitionRejected;
-                _recognizer.RecognizeCompleted += OnRecognizeCompleted;
-                _recognizer.RecognizeAsync(RecognizeMode.Multiple);
-
-                Log("Listening with " + _recognizer.RecognizerInfo.Name + " (" + _recognizer.RecognizerInfo.Culture.Name + ")");
-                ShowBalloon("待ち受けを開始しました", "合図: " + string.Join(", ", _config.Keywords));
-            }
-            catch (Exception ex)
-            {
-                Log("Failed to start listening: " + ex);
-                ShowBalloon("待ち受けを開始できません", ShortMessage(ex));
-            }
-            finally
-            {
-                UpdateListeningUi();
-            }
+            StartOpenWakeWordListening();
+            UpdateListeningUi();
         }
 
         private void StopListening()
         {
             StopOpenWakeWordListening();
-
-            if (_recognizer == null)
-            {
-                return;
-            }
-
-            try
-            {
-                _recognizer.SpeechRecognized -= OnSpeechRecognized;
-                _recognizer.SpeechRecognitionRejected -= OnSpeechRecognitionRejected;
-                _recognizer.RecognizeCompleted -= OnRecognizeCompleted;
-                _recognizer.AudioLevelUpdated -= OnAudioLevelUpdated;
-                _recognizer.AudioSignalProblemOccurred -= OnAudioSignalProblemOccurred;
-                _recognizer.AudioStateChanged -= OnAudioStateChanged;
-                _recognizer.SpeechDetected -= OnSpeechDetected;
-                _recognizer.RecognizeAsyncCancel();
-                _recognizer.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Log("Failed to stop recognizer: " + ex);
-            }
-            finally
-            {
-                _recognizer = null;
-                UpdateListeningUi();
-            }
+            UpdateListeningUi();
         }
 
         private void ToggleListeningPaused()
@@ -327,141 +237,6 @@ namespace VoiceChatLauncher
             string line = "WAKE " + e.Name + " " + e.Score.ToString("0.000", CultureInfo.InvariantCulture);
             Log("OpenWakeWord: " + line);
             TriggerAction("wakeword:" + line);
-        }
-
-        private RecognizerInfo FindRecognizer(string cultureName)
-        {
-            var recognizers = SpeechRecognitionEngine.InstalledRecognizers();
-            if (string.IsNullOrWhiteSpace(cultureName))
-            {
-                foreach (RecognizerInfo info in recognizers)
-                {
-                    return info;
-                }
-
-                return null;
-            }
-
-            foreach (RecognizerInfo info in recognizers)
-            {
-                if (string.Equals(info.Culture.Name, cultureName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return info;
-                }
-            }
-
-            Log("Requested recognizer culture was not found: " + cultureName);
-            return null;
-        }
-
-        private void OnSpeechRecognized(object sender, SpeechRecognizedEventArgs e)
-        {
-            if (e.Result == null)
-            {
-                return;
-            }
-
-            string grammarName = e.Result.Grammar == null ? string.Empty : e.Result.Grammar.Name;
-            Log("Recognized '" + e.Result.Text + "' grammar=" + grammarName + " confidence=" + e.Result.Confidence.ToString("0.00", CultureInfo.InvariantCulture));
-            if (e.Result.Confidence < _config.MinimumConfidence)
-            {
-                return;
-            }
-
-            if (string.Equals(grammarName, "dictation", StringComparison.OrdinalIgnoreCase) &&
-                !TextMatchesKeyword(e.Result.Text))
-            {
-                Log("Dictation text did not match keywords: '" + e.Result.Text + "'");
-                return;
-            }
-
-            TriggerAction("voice:" + e.Result.Text);
-        }
-
-        private void OnSpeechRecognitionRejected(object sender, SpeechRecognitionRejectedEventArgs e)
-        {
-            if (e.Result == null)
-            {
-                Log("Speech rejected: no result");
-                return;
-            }
-
-            Log("Speech rejected: '" + e.Result.Text + "' confidence=" + e.Result.Confidence.ToString("0.00", CultureInfo.InvariantCulture));
-        }
-
-        private void OnSpeechDetected(object sender, SpeechDetectedEventArgs e)
-        {
-            Log("Speech detected at audio position " + e.AudioPosition);
-        }
-
-        private void OnAudioStateChanged(object sender, AudioStateChangedEventArgs e)
-        {
-            Log("Audio state changed: " + e.AudioState);
-        }
-
-        private void OnAudioSignalProblemOccurred(object sender, AudioSignalProblemOccurredEventArgs e)
-        {
-            Log("Audio signal problem: " + e.AudioSignalProblem);
-        }
-
-        private void OnAudioLevelUpdated(object sender, AudioLevelUpdatedEventArgs e)
-        {
-            if (e.AudioLevel <= 0)
-            {
-                return;
-            }
-
-            if ((DateTime.Now - _lastAudioLevelLog).TotalSeconds < 5)
-            {
-                return;
-            }
-
-            _lastAudioLevelLog = DateTime.Now;
-            Log("Audio level: " + e.AudioLevel);
-        }
-
-        private bool TextMatchesKeyword(string text)
-        {
-            string normalizedText = NormalizeForKeywordMatch(text);
-            foreach (string keyword in _config.Keywords)
-            {
-                string normalizedKeyword = NormalizeForKeywordMatch(keyword);
-                if (normalizedText.IndexOf(normalizedKeyword, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static string NormalizeForKeywordMatch(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return string.Empty;
-            }
-
-            string normalized = text.Normalize(NormalizationForm.FormKC).ToLowerInvariant();
-            var builder = new StringBuilder(normalized.Length);
-            foreach (char ch in normalized)
-            {
-                if (!char.IsWhiteSpace(ch) && !char.IsPunctuation(ch) && !char.IsSymbol(ch))
-                {
-                    builder.Append(ch);
-                }
-            }
-
-            return builder.ToString();
-        }
-
-        private void OnRecognizeCompleted(object sender, RecognizeCompletedEventArgs e)
-        {
-            if (e.Error != null)
-            {
-                Log("Recognition stopped with error: " + e.Error);
-                ShowBalloon("音声認識が停止しました", ShortMessage(e.Error));
-            }
         }
 
         private void TriggerAction(string source)
@@ -1200,17 +975,11 @@ namespace VoiceChatLauncher
             {
                 recognizer = "一時停止中";
             }
-            else if (_config.UseOpenWakeWord)
+            else
             {
                 recognizer = _wakeWordListener == null || !_wakeWordListener.IsRunning
                     ? "OpenWakeWord 停止中"
                     : "OpenWakeWord 待ち受け中 (" + _config.OpenWakeWordModels + ")";
-            }
-            else
-            {
-                recognizer = _recognizer == null
-                    ? "停止中"
-                    : _recognizer.RecognizerInfo.Name + " (" + _recognizer.RecognizerInfo.Culture.Name + ")";
             }
 
             MessageBox.Show(
@@ -1231,9 +1000,7 @@ namespace VoiceChatLauncher
                 return string.Empty;
             }
 
-            return _config.UseOpenWakeWord
-                ? _config.OpenWakeWordModels.Replace("_", " ")
-                : string.Join(", ", _config.Keywords);
+            return _config.OpenWakeWordModels.Replace("_", " ");
         }
 
         private string GetListeningStateText()
@@ -1248,8 +1015,7 @@ namespace VoiceChatLauncher
 
         private bool IsListeningActive()
         {
-            return (_config != null && _config.UseOpenWakeWord && _wakeWordListener != null && _wakeWordListener.IsRunning) ||
-                _recognizer != null;
+            return _wakeWordListener != null && _wakeWordListener.IsRunning;
         }
 
         private void UpdateListeningUi()
@@ -1409,7 +1175,6 @@ namespace VoiceChatLauncher
     {
         private readonly AppConfig _config;
         private readonly string _configPath;
-        private ComboBox _listenEngineBox;
         private TextBox _openWakeWordModelsBox;
         private TextBox _openWakeWordMelspectrogramModelPathBox;
         private TextBox _openWakeWordEmbeddingModelPathBox;
@@ -1417,10 +1182,6 @@ namespace VoiceChatLauncher
         private TextBox _openWakeWordDeviceBox;
         private NumericUpDown _openWakeWordVadThresholdBox;
         private CheckBox _openWakeWordLogScoresBox;
-        private TextBox _keywordsBox;
-        private TextBox _cultureBox;
-        private NumericUpDown _minimumConfidenceBox;
-        private CheckBox _enableDictationFallbackBox;
         private NumericUpDown _cooldownMillisecondsBox;
 
         public bool SettingsSaved { get; private set; }
@@ -1446,30 +1207,14 @@ namespace VoiceChatLauncher
             var root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
             root.Padding = new Padding(12);
-            root.RowCount = 3;
+            root.RowCount = 2;
             root.ColumnCount = 1;
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            var enginePanel = new TableLayoutPanel();
-            enginePanel.Dock = DockStyle.Top;
-            enginePanel.ColumnCount = 2;
-            enginePanel.RowCount = 1;
-            enginePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
-            enginePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            enginePanel.Controls.Add(CreateLabel("音声認識エンジン"), 0, 0);
-            _listenEngineBox = new ComboBox();
-            _listenEngineBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            _listenEngineBox.Items.Add("openwakeword");
-            _listenEngineBox.Items.Add("windows");
-            _listenEngineBox.Dock = DockStyle.Fill;
-            enginePanel.Controls.Add(_listenEngineBox, 1, 0);
 
             var tabs = new TabControl();
             tabs.Dock = DockStyle.Fill;
             tabs.TabPages.Add(CreateOpenWakeWordTab());
-            tabs.TabPages.Add(CreateWindowsSpeechTab());
 
             var buttons = new FlowLayoutPanel();
             buttons.FlowDirection = FlowDirection.RightToLeft;
@@ -1490,9 +1235,8 @@ namespace VoiceChatLauncher
             buttons.Controls.Add(cancelButton);
             buttons.Controls.Add(saveButton);
 
-            root.Controls.Add(enginePanel, 0, 0);
-            root.Controls.Add(tabs, 0, 1);
-            root.Controls.Add(buttons, 0, 2);
+            root.Controls.Add(tabs, 0, 0);
+            root.Controls.Add(buttons, 0, 1);
 
             AcceptButton = saveButton;
             CancelButton = cancelButton;
@@ -1511,20 +1255,6 @@ namespace VoiceChatLauncher
             _openWakeWordDeviceBox = AddTextBox(panel, "マイクデバイス", "空なら既定のマイク");
             _openWakeWordVadThresholdBox = AddDecimalBox(panel, "VADしきい値", 0, 1, 2, 0.01m);
             _openWakeWordLogScoresBox = AddCheckBox(panel, "スコアをログ出力する");
-
-            tab.Controls.Add(panel);
-            return tab;
-        }
-
-        private TabPage CreateWindowsSpeechTab()
-        {
-            var tab = new TabPage("Windows 音声認識");
-            var panel = CreateFormPanel();
-
-            _keywordsBox = AddMultilineTextBox(panel, "合図", "| 区切りで複数指定できます");
-            _cultureBox = AddTextBox(panel, "認識言語", "例: ja-JP。空なら既定");
-            _minimumConfidenceBox = AddDecimalBox(panel, "最低信頼度", 0, 1, 2, 0.01m);
-            _enableDictationFallbackBox = AddCheckBox(panel, "自由認識から合図を探す");
             _cooldownMillisecondsBox = AddIntBox(panel, "クールダウン(ms)", 0, 60000, 100);
 
             tab.Controls.Add(panel);
@@ -1625,7 +1355,6 @@ namespace VoiceChatLauncher
 
         private void LoadValues()
         {
-            _listenEngineBox.SelectedItem = _config.UseOpenWakeWord ? "openwakeword" : "windows";
             _openWakeWordModelsBox.Text = _config.OpenWakeWordModels;
             _openWakeWordMelspectrogramModelPathBox.Text = _config.OpenWakeWordMelspectrogramModelPath;
             _openWakeWordEmbeddingModelPathBox.Text = _config.OpenWakeWordEmbeddingModelPath;
@@ -1633,11 +1362,6 @@ namespace VoiceChatLauncher
             _openWakeWordDeviceBox.Text = _config.OpenWakeWordDevice;
             _openWakeWordVadThresholdBox.Value = ClampDecimal((decimal)_config.OpenWakeWordVadThreshold, _openWakeWordVadThresholdBox.Minimum, _openWakeWordVadThresholdBox.Maximum);
             _openWakeWordLogScoresBox.Checked = _config.OpenWakeWordLogScores;
-
-            _keywordsBox.Text = string.Join("|", _config.Keywords.ToArray());
-            _cultureBox.Text = _config.Culture;
-            _minimumConfidenceBox.Value = ClampDecimal((decimal)_config.MinimumConfidence, _minimumConfidenceBox.Minimum, _minimumConfidenceBox.Maximum);
-            _enableDictationFallbackBox.Checked = _config.EnableDictationFallback;
             _cooldownMillisecondsBox.Value = ClampDecimal(_config.CooldownMilliseconds, _cooldownMillisecondsBox.Minimum, _cooldownMillisecondsBox.Maximum);
         }
 
@@ -1645,28 +1369,13 @@ namespace VoiceChatLauncher
         {
             try
             {
-                string listenEngine = Convert.ToString(_listenEngineBox.SelectedItem, CultureInfo.InvariantCulture);
-                if (string.IsNullOrWhiteSpace(listenEngine))
-                {
-                    listenEngine = "openwakeword";
-                }
-
                 string models = _openWakeWordModelsBox.Text.Trim();
-                string keywords = _keywordsBox.Text.Trim();
-
-                if (string.Equals(listenEngine, "openwakeword", StringComparison.OrdinalIgnoreCase) && models.Length == 0)
+                if (models.Length == 0)
                 {
                     ShowValidationError("OpenWakeWord のモデルを入力してください。");
                     return;
                 }
 
-                if (string.Equals(listenEngine, "windows", StringComparison.OrdinalIgnoreCase) && SplitList(keywords).Count == 0)
-                {
-                    ShowValidationError("Windows 音声認識の合図を1つ以上入力してください。");
-                    return;
-                }
-
-                _config.ListenEngine = listenEngine;
                 _config.OpenWakeWordModels = models;
                 _config.OpenWakeWordMelspectrogramModelPath = _openWakeWordMelspectrogramModelPathBox.Text.Trim();
                 _config.OpenWakeWordEmbeddingModelPath = _openWakeWordEmbeddingModelPathBox.Text.Trim();
@@ -1674,11 +1383,6 @@ namespace VoiceChatLauncher
                 _config.OpenWakeWordDevice = _openWakeWordDeviceBox.Text.Trim();
                 _config.OpenWakeWordVadThreshold = (float)_openWakeWordVadThresholdBox.Value;
                 _config.OpenWakeWordLogScores = _openWakeWordLogScoresBox.Checked;
-
-                _config.Keywords = SplitList(keywords);
-                _config.Culture = _cultureBox.Text.Trim();
-                _config.MinimumConfidence = (float)_minimumConfidenceBox.Value;
-                _config.EnableDictationFallback = _enableDictationFallbackBox.Checked;
                 _config.CooldownMilliseconds = (int)_cooldownMillisecondsBox.Value;
 
                 _config.Save(_configPath);
@@ -2602,11 +2306,6 @@ namespace VoiceChatLauncher
 
     internal sealed class AppConfig
     {
-        public List<string> Keywords = new List<string>();
-        public string ListenEngine = "openwakeword";
-        public string Culture = string.Empty;
-        public float MinimumConfidence = 0.72f;
-        public bool EnableDictationFallback = true;
         public int CooldownMilliseconds = 4000;
         public string OpenWakeWordModels = @"..\models\Hey_Lucy_20260609_095011.onnx";
         public string OpenWakeWordMelspectrogramModelPath = @"..\models\melspectrogram.onnx";
@@ -2637,15 +2336,6 @@ namespace VoiceChatLauncher
         public int WindowTimeoutMilliseconds = 15000;
         public int ButtonTimeoutMilliseconds = 15000;
 
-        public bool UseOpenWakeWord
-        {
-            get
-            {
-                return string.Equals(ListenEngine, "openwakeword", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(ListenEngine, "wakeword", StringComparison.OrdinalIgnoreCase);
-            }
-        }
-
         public static AppConfig Load(string path)
         {
             if (!File.Exists(path))
@@ -2654,12 +2344,7 @@ namespace VoiceChatLauncher
             }
 
             var config = new AppConfig();
-            config.Keywords.Add("チャット ジーピーティー");
-            config.Keywords.Add("チャットジーピーティー");
-            config.Keywords.Add("チャットGPT");
-            config.Keywords.Add("チャット gpt");
-            config.Keywords.Add("chat gpt");
-            config.Keywords.Add("chatgpt");
+            config.ProcessNames.Add("chatgpt.exe");
             config.ProcessNames.Add("ChatGPT");
             config.ProcessNames.Add("OpenAI");
             config.VoiceButtonNames.Add("音声を使用する");
@@ -2712,7 +2397,6 @@ namespace VoiceChatLauncher
             builder.AppendLine("# Separate multiple values with |");
             builder.AppendLine();
             builder.AppendLine("# Voice settings. Edit from the tray Settings screen or update this file directly.");
-            AppendValue(builder, "ListenEngine", ListenEngine);
             AppendValue(builder, "OpenWakeWordModels", OpenWakeWordModels);
             AppendValue(builder, "OpenWakeWordMelspectrogramModelPath", OpenWakeWordMelspectrogramModelPath);
             AppendValue(builder, "OpenWakeWordEmbeddingModelPath", OpenWakeWordEmbeddingModelPath);
@@ -2720,12 +2404,6 @@ namespace VoiceChatLauncher
             AppendValue(builder, "OpenWakeWordDevice", OpenWakeWordDevice);
             AppendValue(builder, "OpenWakeWordVadThreshold", FormatFloat(OpenWakeWordVadThreshold));
             AppendValue(builder, "OpenWakeWordLogScores", FormatBool(OpenWakeWordLogScores));
-            builder.AppendLine();
-            builder.AppendLine("# Legacy Windows Speech settings. Used only when ListenEngine=windows.");
-            AppendValue(builder, "Keywords", JoinList(Keywords));
-            AppendValue(builder, "Culture", Culture);
-            AppendValue(builder, "MinimumConfidence", FormatFloat(MinimumConfidence));
-            AppendValue(builder, "EnableDictationFallback", FormatBool(EnableDictationFallback));
             AppendValue(builder, "CooldownMilliseconds", CooldownMilliseconds.ToString(CultureInfo.InvariantCulture));
             builder.AppendLine();
             builder.AppendLine("# LaunchCommand can be a URI such as chatgpt:, an .exe path, or shell:AppsFolder\\<AppID>.");
@@ -2744,7 +2422,7 @@ namespace VoiceChatLauncher
             AppendValue(builder, "AfterBringToFrontDelayMilliseconds", AfterBringToFrontDelayMilliseconds.ToString(CultureInfo.InvariantCulture));
             AppendValue(builder, "WindowTimeoutMilliseconds", WindowTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture));
             builder.AppendLine();
-            builder.AppendLine("# Used to find and press the voice conversation button, not the dictation button.");
+            builder.AppendLine("# Used to find and press the voice conversation button.");
             AppendValue(builder, "VoiceButtonNames", JoinList(VoiceButtonNames));
             AppendValue(builder, "ExcludedButtonNames", JoinList(ExcludedButtonNames));
             AppendValue(builder, "RightmostVoiceButtonFallback", FormatBool(RightmostVoiceButtonFallback));
@@ -2768,31 +2446,7 @@ namespace VoiceChatLauncher
 
         private static void Apply(AppConfig config, string key, string value)
         {
-            if (EqualsKey(key, "Keywords"))
-            {
-                config.Keywords = SplitList(value);
-            }
-            else if (EqualsKey(key, "ListenEngine"))
-            {
-                config.ListenEngine = value;
-            }
-            else if (EqualsKey(key, "Culture"))
-            {
-                config.Culture = value;
-            }
-            else if (EqualsKey(key, "MinimumConfidence"))
-            {
-                float result;
-                if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result))
-                {
-                    config.MinimumConfidence = result;
-                }
-            }
-            else if (EqualsKey(key, "EnableDictationFallback"))
-            {
-                config.EnableDictationFallback = ParseBool(value, config.EnableDictationFallback);
-            }
-            else if (EqualsKey(key, "OpenWakeWordModels"))
+            if (EqualsKey(key, "OpenWakeWordModels"))
             {
                 config.OpenWakeWordModels = value;
             }
@@ -2998,10 +2652,8 @@ namespace VoiceChatLauncher
 @"# Voice Chat Launcher settings
 # Separate multiple values with |
 
-# The words or phrases that trigger ChatGPT voice mode.
-# ListenEngine=openwakeword uses OpenWakeWord and ignores Keywords.
+# The wake word that triggers ChatGPT voice mode.
 # Say ""Hey Lucy"" by default.
-ListenEngine=openwakeword
 OpenWakeWordModels=..\models\Hey_Lucy_20260609_095011.onnx
 OpenWakeWordMelspectrogramModelPath=..\models\melspectrogram.onnx
 OpenWakeWordEmbeddingModelPath=..\models\embedding_model.onnx
@@ -3009,12 +2661,6 @@ OpenWakeWordThreshold=0.80
 OpenWakeWordDevice=
 OpenWakeWordVadThreshold=0.0
 OpenWakeWordLogScores=false
-
-# Legacy Windows Speech settings. Used only when ListenEngine=windows.
-Keywords=チャット ジーピーティー|チャットジーピーティー|チャットGPT|チャット gpt|chat gpt|chatgpt
-Culture=
-MinimumConfidence=0.60
-EnableDictationFallback=true
 CooldownMilliseconds=4000
 
 # LaunchCommand can be a URI such as chatgpt:, an .exe path, or shell:AppsFolder\<AppID>.
@@ -3024,7 +2670,7 @@ LaunchArguments=
 
 # Used to find the ChatGPT window after launch.
 WindowTitleKeyword=ChatGPT
-ProcessNames=ChatGPT|OpenAI
+ProcessNames=chatgpt.exe|ChatGPT|OpenAI
 MinimumWindowWidth=320
 MinimumWindowHeight=200
 CenterWindowOnForeground=true
@@ -3034,7 +2680,7 @@ StartupDelayMilliseconds=2500
 AfterBringToFrontDelayMilliseconds=1200
 WindowTimeoutMilliseconds=15000
 
-# Used to find and press the voice conversation button, not the dictation button.
+# Used to find and press the voice conversation button.
 VoiceButtonNames=音声を使用する|音声を使用|音声を開始する|音声を開始|音声モードを開始|音声モードを開始する|音声チャットを開始|音声で会話する|Start voice chat|Start voice|Start voice mode|Use voice mode|Talk to ChatGPT|Voice mode
 ExcludedButtonNames=音声入力を開始|音声を入力する|音声入力|プロンプトを送信する|プロファイルメニューを開く
 RightmostVoiceButtonFallback=false
