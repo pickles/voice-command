@@ -1183,6 +1183,27 @@ namespace VoiceChatLauncher
         private NumericUpDown _openWakeWordVadThresholdBox;
         private CheckBox _openWakeWordLogScoresBox;
         private NumericUpDown _cooldownMillisecondsBox;
+        private TextBox _launchCommandBox;
+        private TextBox _launchArgumentsBox;
+        private CheckBox _runActionOnStartupBox;
+        private NumericUpDown _startupActionDelayMillisecondsBox;
+        private NumericUpDown _startupDelayMillisecondsBox;
+        private NumericUpDown _afterBringToFrontDelayMillisecondsBox;
+        private TextBox _windowTitleKeywordBox;
+        private TextBox _processNamesBox;
+        private NumericUpDown _minimumWindowWidthBox;
+        private NumericUpDown _minimumWindowHeightBox;
+        private CheckBox _centerWindowOnForegroundBox;
+        private NumericUpDown _windowTimeoutMillisecondsBox;
+        private TextBox _voiceButtonNamesBox;
+        private TextBox _excludedButtonNamesBox;
+        private CheckBox _rightmostVoiceButtonFallbackBox;
+        private NumericUpDown _buttonTimeoutMillisecondsBox;
+        private CheckBox _coordinateFallbackEnabledBox;
+        private NumericUpDown _coordinateFallbackMaxComposerWidthBox;
+        private NumericUpDown _coordinateFallbackHorizontalMarginBox;
+        private NumericUpDown _coordinateFallbackRightOffsetBox;
+        private NumericUpDown _coordinateFallbackBottomOffsetBox;
 
         public bool SettingsSaved { get; private set; }
 
@@ -1196,7 +1217,7 @@ namespace VoiceChatLauncher
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new System.Drawing.Size(560, 560);
+            ClientSize = new System.Drawing.Size(640, 600);
 
             BuildUi();
             LoadValues();
@@ -1215,6 +1236,10 @@ namespace VoiceChatLauncher
             var tabs = new TabControl();
             tabs.Dock = DockStyle.Fill;
             tabs.TabPages.Add(CreateOpenWakeWordTab());
+            tabs.TabPages.Add(CreateLaunchTab());
+            tabs.TabPages.Add(CreateWindowTab());
+            tabs.TabPages.Add(CreateVoiceButtonTab());
+            tabs.TabPages.Add(CreateCoordinateFallbackTab());
 
             var buttons = new FlowLayoutPanel();
             buttons.FlowDirection = FlowDirection.RightToLeft;
@@ -1256,6 +1281,67 @@ namespace VoiceChatLauncher
             _openWakeWordVadThresholdBox = AddDecimalBox(panel, "VADしきい値", 0, 1, 2, 0.01m);
             _openWakeWordLogScoresBox = AddCheckBox(panel, "スコアをログ出力する");
             _cooldownMillisecondsBox = AddIntBox(panel, "クールダウン(ms)", 0, 60000, 100);
+
+            tab.Controls.Add(panel);
+            return tab;
+        }
+
+        private TabPage CreateLaunchTab()
+        {
+            var tab = new TabPage("起動");
+            var panel = CreateFormPanel();
+
+            _launchCommandBox = AddTextBox(panel, "起動コマンド", "例: chatgpt:");
+            _launchArgumentsBox = AddTextBox(panel, "起動引数", "必要な場合のみ指定");
+            _runActionOnStartupBox = AddCheckBox(panel, "起動時に音声ボタンを押す");
+            _startupActionDelayMillisecondsBox = AddIntBox(panel, "起動時実行の待機(ms)", 0, 600000, 100);
+            _startupDelayMillisecondsBox = AddIntBox(panel, "ChatGPT起動後待機(ms)", 0, 600000, 100);
+            _afterBringToFrontDelayMillisecondsBox = AddIntBox(panel, "前面化後待機(ms)", 0, 600000, 100);
+
+            tab.Controls.Add(panel);
+            return tab;
+        }
+
+        private TabPage CreateWindowTab()
+        {
+            var tab = new TabPage("ウィンドウ");
+            var panel = CreateFormPanel();
+
+            _windowTitleKeywordBox = AddTextBox(panel, "タイトルキーワード", "例: ChatGPT");
+            _processNamesBox = AddMultilineTextBox(panel, "プロセス名", "例: chatgpt.exe");
+            _minimumWindowWidthBox = AddIntBox(panel, "最小幅", 0, 10000, 10);
+            _minimumWindowHeightBox = AddIntBox(panel, "最小高さ", 0, 10000, 10);
+            _centerWindowOnForegroundBox = AddCheckBox(panel, "前面化時に画面中央へ移動する");
+            _windowTimeoutMillisecondsBox = AddIntBox(panel, "検出タイムアウト(ms)", 0, 600000, 100);
+
+            tab.Controls.Add(panel);
+            return tab;
+        }
+
+        private TabPage CreateVoiceButtonTab()
+        {
+            var tab = new TabPage("音声ボタン");
+            var panel = CreateFormPanel();
+
+            _voiceButtonNamesBox = AddMultilineTextBox(panel, "ボタン名", "1行に1つ、または | 区切り");
+            _excludedButtonNamesBox = AddMultilineTextBox(panel, "除外ボタン名", "1行に1つ、または | 区切り");
+            _rightmostVoiceButtonFallbackBox = AddCheckBox(panel, "右下の見えるボタンを候補にする");
+            _buttonTimeoutMillisecondsBox = AddIntBox(panel, "ボタン待機(ms)", 0, 600000, 100);
+
+            tab.Controls.Add(panel);
+            return tab;
+        }
+
+        private TabPage CreateCoordinateFallbackTab()
+        {
+            var tab = new TabPage("位置クリック");
+            var panel = CreateFormPanel();
+
+            _coordinateFallbackEnabledBox = AddCheckBox(panel, "位置クリックを有効にする");
+            _coordinateFallbackMaxComposerWidthBox = AddIntBox(panel, "入力欄の最大幅", 0, 10000, 10);
+            _coordinateFallbackHorizontalMarginBox = AddIntBox(panel, "左右余白", 0, 5000, 1);
+            _coordinateFallbackRightOffsetBox = AddIntBox(panel, "右オフセット", -5000, 5000, 1);
+            _coordinateFallbackBottomOffsetBox = AddIntBox(panel, "下オフセット", -5000, 5000, 1);
 
             tab.Controls.Add(panel);
             return tab;
@@ -1363,6 +1449,27 @@ namespace VoiceChatLauncher
             _openWakeWordVadThresholdBox.Value = ClampDecimal((decimal)_config.OpenWakeWordVadThreshold, _openWakeWordVadThresholdBox.Minimum, _openWakeWordVadThresholdBox.Maximum);
             _openWakeWordLogScoresBox.Checked = _config.OpenWakeWordLogScores;
             _cooldownMillisecondsBox.Value = ClampDecimal(_config.CooldownMilliseconds, _cooldownMillisecondsBox.Minimum, _cooldownMillisecondsBox.Maximum);
+            _launchCommandBox.Text = _config.LaunchCommand;
+            _launchArgumentsBox.Text = _config.LaunchArguments;
+            _runActionOnStartupBox.Checked = _config.RunActionOnStartup;
+            _startupActionDelayMillisecondsBox.Value = ClampDecimal(_config.StartupActionDelayMilliseconds, _startupActionDelayMillisecondsBox.Minimum, _startupActionDelayMillisecondsBox.Maximum);
+            _startupDelayMillisecondsBox.Value = ClampDecimal(_config.StartupDelayMilliseconds, _startupDelayMillisecondsBox.Minimum, _startupDelayMillisecondsBox.Maximum);
+            _afterBringToFrontDelayMillisecondsBox.Value = ClampDecimal(_config.AfterBringToFrontDelayMilliseconds, _afterBringToFrontDelayMillisecondsBox.Minimum, _afterBringToFrontDelayMillisecondsBox.Maximum);
+            _windowTitleKeywordBox.Text = _config.WindowTitleKeyword;
+            _processNamesBox.Text = FormatListForEditor(_config.ProcessNames);
+            _minimumWindowWidthBox.Value = ClampDecimal(_config.MinimumWindowWidth, _minimumWindowWidthBox.Minimum, _minimumWindowWidthBox.Maximum);
+            _minimumWindowHeightBox.Value = ClampDecimal(_config.MinimumWindowHeight, _minimumWindowHeightBox.Minimum, _minimumWindowHeightBox.Maximum);
+            _centerWindowOnForegroundBox.Checked = _config.CenterWindowOnForeground;
+            _windowTimeoutMillisecondsBox.Value = ClampDecimal(_config.WindowTimeoutMilliseconds, _windowTimeoutMillisecondsBox.Minimum, _windowTimeoutMillisecondsBox.Maximum);
+            _voiceButtonNamesBox.Text = FormatListForEditor(_config.VoiceButtonNames);
+            _excludedButtonNamesBox.Text = FormatListForEditor(_config.ExcludedButtonNames);
+            _rightmostVoiceButtonFallbackBox.Checked = _config.RightmostVoiceButtonFallback;
+            _buttonTimeoutMillisecondsBox.Value = ClampDecimal(_config.ButtonTimeoutMilliseconds, _buttonTimeoutMillisecondsBox.Minimum, _buttonTimeoutMillisecondsBox.Maximum);
+            _coordinateFallbackEnabledBox.Checked = _config.CoordinateFallbackEnabled;
+            _coordinateFallbackMaxComposerWidthBox.Value = ClampDecimal(_config.CoordinateFallbackMaxComposerWidth, _coordinateFallbackMaxComposerWidthBox.Minimum, _coordinateFallbackMaxComposerWidthBox.Maximum);
+            _coordinateFallbackHorizontalMarginBox.Value = ClampDecimal(_config.CoordinateFallbackHorizontalMargin, _coordinateFallbackHorizontalMarginBox.Minimum, _coordinateFallbackHorizontalMarginBox.Maximum);
+            _coordinateFallbackRightOffsetBox.Value = ClampDecimal(_config.CoordinateFallbackRightOffset, _coordinateFallbackRightOffsetBox.Minimum, _coordinateFallbackRightOffsetBox.Maximum);
+            _coordinateFallbackBottomOffsetBox.Value = ClampDecimal(_config.CoordinateFallbackBottomOffset, _coordinateFallbackBottomOffsetBox.Minimum, _coordinateFallbackBottomOffsetBox.Maximum);
         }
 
         private void SaveSettings()
@@ -1370,20 +1477,62 @@ namespace VoiceChatLauncher
             try
             {
                 string models = _openWakeWordModelsBox.Text.Trim();
+                string melspectrogramModel = _openWakeWordMelspectrogramModelPathBox.Text.Trim();
+                string embeddingModel = _openWakeWordEmbeddingModelPathBox.Text.Trim();
+                List<string> voiceButtonNames = SplitList(_voiceButtonNamesBox.Text);
                 if (models.Length == 0)
                 {
                     ShowValidationError("OpenWakeWord のモデルを入力してください。");
                     return;
                 }
 
+                if (melspectrogramModel.Length == 0)
+                {
+                    ShowValidationError("OpenWakeWord の Mel モデルを入力してください。");
+                    return;
+                }
+
+                if (embeddingModel.Length == 0)
+                {
+                    ShowValidationError("OpenWakeWord の Embedding モデルを入力してください。");
+                    return;
+                }
+
+                if (voiceButtonNames.Count == 0 && !_rightmostVoiceButtonFallbackBox.Checked && !_coordinateFallbackEnabledBox.Checked)
+                {
+                    ShowValidationError("音声ボタン名を入力するか、フォールバックを有効にしてください。");
+                    return;
+                }
+
                 _config.OpenWakeWordModels = models;
-                _config.OpenWakeWordMelspectrogramModelPath = _openWakeWordMelspectrogramModelPathBox.Text.Trim();
-                _config.OpenWakeWordEmbeddingModelPath = _openWakeWordEmbeddingModelPathBox.Text.Trim();
+                _config.OpenWakeWordMelspectrogramModelPath = melspectrogramModel;
+                _config.OpenWakeWordEmbeddingModelPath = embeddingModel;
                 _config.OpenWakeWordThreshold = (float)_openWakeWordThresholdBox.Value;
                 _config.OpenWakeWordDevice = _openWakeWordDeviceBox.Text.Trim();
                 _config.OpenWakeWordVadThreshold = (float)_openWakeWordVadThresholdBox.Value;
                 _config.OpenWakeWordLogScores = _openWakeWordLogScoresBox.Checked;
                 _config.CooldownMilliseconds = (int)_cooldownMillisecondsBox.Value;
+                _config.LaunchCommand = _launchCommandBox.Text.Trim();
+                _config.LaunchArguments = _launchArgumentsBox.Text.Trim();
+                _config.RunActionOnStartup = _runActionOnStartupBox.Checked;
+                _config.StartupActionDelayMilliseconds = (int)_startupActionDelayMillisecondsBox.Value;
+                _config.StartupDelayMilliseconds = (int)_startupDelayMillisecondsBox.Value;
+                _config.AfterBringToFrontDelayMilliseconds = (int)_afterBringToFrontDelayMillisecondsBox.Value;
+                _config.WindowTitleKeyword = _windowTitleKeywordBox.Text.Trim();
+                _config.ProcessNames = SplitList(_processNamesBox.Text);
+                _config.MinimumWindowWidth = (int)_minimumWindowWidthBox.Value;
+                _config.MinimumWindowHeight = (int)_minimumWindowHeightBox.Value;
+                _config.CenterWindowOnForeground = _centerWindowOnForegroundBox.Checked;
+                _config.WindowTimeoutMilliseconds = (int)_windowTimeoutMillisecondsBox.Value;
+                _config.VoiceButtonNames = voiceButtonNames;
+                _config.ExcludedButtonNames = SplitList(_excludedButtonNamesBox.Text);
+                _config.RightmostVoiceButtonFallback = _rightmostVoiceButtonFallbackBox.Checked;
+                _config.ButtonTimeoutMilliseconds = (int)_buttonTimeoutMillisecondsBox.Value;
+                _config.CoordinateFallbackEnabled = _coordinateFallbackEnabledBox.Checked;
+                _config.CoordinateFallbackMaxComposerWidth = (int)_coordinateFallbackMaxComposerWidthBox.Value;
+                _config.CoordinateFallbackHorizontalMargin = (int)_coordinateFallbackHorizontalMarginBox.Value;
+                _config.CoordinateFallbackRightOffset = (int)_coordinateFallbackRightOffsetBox.Value;
+                _config.CoordinateFallbackBottomOffset = (int)_coordinateFallbackBottomOffsetBox.Value;
 
                 _config.Save(_configPath);
                 SettingsSaved = true;
@@ -1417,7 +1566,7 @@ namespace VoiceChatLauncher
         private static List<string> SplitList(string value)
         {
             var list = new List<string>();
-            string[] parts = value.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = value.Split(new[] { '|', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (string part in parts)
             {
                 string trimmed = part.Trim();
@@ -1428,6 +1577,16 @@ namespace VoiceChatLauncher
             }
 
             return list;
+        }
+
+        private static string FormatListForEditor(List<string> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return string.Join(Environment.NewLine, values.ToArray());
         }
 
         private static void ShowValidationError(string message)

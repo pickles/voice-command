@@ -48,12 +48,12 @@ bin\config.ini
 
 ## 設定
 
-起動後、タスクトレイの Voice Chat Launcher アイコンを右クリックして `設定` を開くと、音声関連の設定を変更できます。
+起動後、タスクトレイの Voice Chat Launcher アイコンを右クリックして `設定` を開くと、Wake Word、ChatGPT の起動、ウィンドウ検出、音声ボタン検出、位置クリックの設定を変更できます。
 保存すると `bin\config.ini` に反映され、待ち受けが新しい設定で再起動します。
 
 同じタスクトレイメニューから `音声認識を一時停止` を選ぶと待ち受けを止められます。一時停止中は音声コマンドを処理しません。再開する場合は `音声認識を再開` を選びます。`状態を表示` で現在の状態を確認できます。
 
-詳細な設定は `bin\config.ini` でも変更できます。
+同じ内容は `bin\config.ini` を直接編集しても変更できます。
 
 - `OpenWakeWordModels`: 待ち受けるモデルです。標準では `..\models\Hey_Lucy_20260609_095011.onnx` です。
 - `OpenWakeWordMelspectrogramModelPath`: OpenWakeWord の特徴量生成に使う `melspectrogram.onnx` です。
@@ -88,7 +88,7 @@ OpenWakeWord 用に作成された `.onnx` ファイルを `models` フォルダ
 models\my_wakeword.onnx
 ```
 
-その後、`bin\config.ini` を変更します。
+その後、設定画面の `OpenWakeWord` タブで `モデル` を変更します。`bin\config.ini` を直接編集する場合は次のように指定します。
 
 ```ini
 OpenWakeWordModels=..\models\my_wakeword.onnx
