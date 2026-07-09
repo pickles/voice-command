@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$src = Join-Path $root "src\VoiceChatLauncher\Program.cs"
+$srcDir = Join-Path $root "src\VoiceChatLauncher"
 $dependencyProject = Join-Path $root "src\VoiceChatLauncher\VoiceChatLauncher.Dependencies.csproj"
 $packagesDir = Join-Path $root "packages"
 $outDir = Join-Path $root "bin"
@@ -18,6 +18,10 @@ $onnxRuntimeProviders = Join-Path $packagesDir "microsoft.ml.onnxruntime\1.18.1\
 $systemMemory = Join-Path $packagesDir "system.memory\4.5.5\lib\net461\System.Memory.dll"
 $systemBuffers = Join-Path $packagesDir "system.buffers\4.5.1\lib\net461\System.Buffers.dll"
 $systemUnsafe = Join-Path $packagesDir "system.runtime.compilerservices.unsafe\4.5.3\lib\net461\System.Runtime.CompilerServices.Unsafe.dll"
+$sources = Get-ChildItem $srcDir -Recurse -Filter "*.cs" |
+    Where-Object { $_.FullName -notlike "*\obj\*" } |
+    Sort-Object FullName |
+    Select-Object -ExpandProperty FullName
 
 if (-not (Test-Path $csc)) {
     throw "C# compiler was not found: $csc"
@@ -50,7 +54,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
     /reference:$uiAutomationClient `
     /reference:$uiAutomationTypes `
     /reference:$windowsBase `
-    $src
+    $sources
 
 if ($LASTEXITCODE -ne 0) {
     throw "Build failed with exit code $LASTEXITCODE"
