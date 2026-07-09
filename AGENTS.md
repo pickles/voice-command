@@ -6,7 +6,12 @@ Voice Chat Launcher is a Windows tray application that listens for a wake word a
 
 Important paths:
 
-- `src/VoiceChatLauncher/Program.cs`: main application, tray UI, settings UI, config parsing, ChatGPT window automation.
+- `src/VoiceChatLauncher/Program.cs`: application entry point, tray lifetime, ChatGPT window automation, action orchestration.
+- `src/VoiceChatLauncher/StatusForm.cs`: status window and simple log viewer.
+- `src/VoiceChatLauncher/SettingsForm.cs`: settings UI.
+- `src/VoiceChatLauncher/AppConfig.cs`: config parsing and default config text.
+- `src/VoiceChatLauncher/OpenWakeWord.cs`: C# OpenWakeWord runtime and microphone capture.
+- `src/VoiceChatLauncher/NativeInterop.cs`: Win32 and waveIn interop types.
 - `config.example.ini`: default user-facing configuration copied to `bin/config.ini` on first build.
 - `build.ps1`: canonical build command.
 - `diagnose.ps1`: local diagnostics for ChatGPT app registration.
@@ -34,7 +39,7 @@ Use these commands from the repository root:
 
 ## Coding Guidelines
 
-- Preserve the current single-file C# app structure unless a task clearly requires a larger refactor.
+- Keep source files split by responsibility; avoid reintroducing unrelated behavior into `Program.cs`.
 - Target .NET Framework 4.x and APIs available to `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`.
 - Keep UI changes in WinForms. The app already references WPF types for UI Automation, so qualify ambiguous types such as `System.Drawing.Size` when necessary.
 - Prefer explicit, defensive error handling around process launch, UI Automation, file IO, microphone capture, and wake-word recognition because these depend on local OS state.
