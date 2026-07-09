@@ -9,7 +9,7 @@ Important paths:
 - `src/VoiceChatLauncher/Program.cs`: main application, tray UI, settings UI, config parsing, ChatGPT window automation.
 - `config.example.ini`: default user-facing configuration copied to `bin/config.ini` on first build.
 - `build.ps1`: canonical build command.
-- `diagnose.ps1`: local diagnostics for speech recognizers and ChatGPT app registration.
+- `diagnose.ps1`: local diagnostics for ChatGPT app registration.
 
 ## Commands
 
@@ -37,7 +37,7 @@ Use these commands from the repository root:
 - Preserve the current single-file C# app structure unless a task clearly requires a larger refactor.
 - Target .NET Framework 4.x and APIs available to `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`.
 - Keep UI changes in WinForms. The app already references WPF types for UI Automation, so qualify ambiguous types such as `System.Drawing.Size` when necessary.
-- Prefer explicit, defensive error handling around process launch, UI Automation, file IO, and speech recognition because these depend on local OS state.
+- Prefer explicit, defensive error handling around process launch, UI Automation, file IO, microphone capture, and wake-word recognition because these depend on local OS state.
 - Keep user-facing Japanese text consistent with the existing README and app messages.
 - Avoid broad refactors in `Program.cs`; many behaviors are coupled to Windows process state, tray lifetime, and config reloads.
 
