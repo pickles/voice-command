@@ -9,6 +9,9 @@ Important paths:
 - `src/VoiceChatLauncher/Program.cs`: application entry point, tray lifetime, ChatGPT window automation, action orchestration.
 - `src/VoiceChatLauncher/StatusForm.cs`: status window and simple log viewer.
 - `src/VoiceChatLauncher/SettingsForm.cs`: settings UI.
+- `src/VoiceChatLauncher/AboutForm.cs`: About window.
+- `src/VoiceChatLauncher/ThirdPartyLicenses.cs`: OSS license metadata shown in the About window.
+- `src/VoiceChatLauncher/Properties/AssemblyInfo.cs`: application version metadata.
 - `src/VoiceChatLauncher/AppConfig.cs`: config parsing and default config text.
 - `src/VoiceChatLauncher/OpenWakeWord.cs`: C# OpenWakeWord runtime and microphone capture.
 - `src/VoiceChatLauncher/NativeInterop.cs`: Win32 and waveIn interop types.

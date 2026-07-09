@@ -38,6 +38,7 @@ namespace VoiceChatLauncher
         private readonly object _logSync = new object();
         private NotifyIcon _notifyIcon;
         private MenuItem _toggleListeningMenuItem;
+        private AboutForm _aboutForm;
         private StatusForm _statusForm;
         private SettingsForm _settingsForm;
         private AppConfig _config;
@@ -69,6 +70,8 @@ namespace VoiceChatLauncher
             menu.MenuItems.Add("-");
             menu.MenuItems.Add("設定", delegate { OpenConfig(); });
             menu.MenuItems.Add("設定を再読み込み", delegate { Reload(); });
+            menu.MenuItems.Add("-");
+            menu.MenuItems.Add("About / ライセンス", delegate { OpenAbout(); });
             menu.MenuItems.Add("-");
             menu.MenuItems.Add("終了", delegate { ExitThread(); });
 
@@ -1095,6 +1098,20 @@ namespace VoiceChatLauncher
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
+        }
+
+        private void OpenAbout()
+        {
+            if (_aboutForm != null && !_aboutForm.IsDisposed)
+            {
+                _aboutForm.Activate();
+                return;
+            }
+
+            _aboutForm = new AboutForm();
+            _aboutForm.FormClosed += delegate { _aboutForm = null; };
+            _aboutForm.Show();
+            _aboutForm.Activate();
         }
 
         private void ShowBalloon(string title, string text)
