@@ -73,6 +73,18 @@ bin\config.ini
 - `CoordinateFallbackBottomOffset`: 位置クリックが上下にずれる場合に調整します。大きくすると上、小さくすると下をクリックします。
 - `CoordinateFallbackRightOffset`: 位置クリックが左右にずれる場合に調整します。大きくすると左、小さくすると右をクリックします。
 
+## About / ライセンス
+
+タスクトレイメニューの `About / ライセンス` から、アプリのバージョンと利用している OSS ライブラリのライセンス情報を確認できます。
+
+依存パッケージを追加、削除、更新した場合は次の手順でライセンス情報も更新してください。
+
+1. `.\setup_openwakeword.ps1` または `.\build.ps1` を実行して NuGet パッケージを復元します。
+2. `src\VoiceChatLauncher\VoiceChatLauncher.Dependencies.csproj`、`build.ps1` のコピー対象 DLL、`packages\*\*\*.nuspec` の `id` / `version` / `license` / `projectUrl` を確認します。
+3. About 画面の表示元である `src\VoiceChatLauncher\ThirdPartyLicenses.cs` を実際の依存関係に合わせて更新します。
+4. バージョンを変更する場合は `src\VoiceChatLauncher\Properties\AssemblyInfo.cs` の `AssemblyVersion`、`AssemblyFileVersion`、`AssemblyInformationalVersion` を更新します。
+5. `.\build.ps1` でビルドできることを確認します。
+
 ## OpenWakeWord
 
 OpenWakeWord は C# runtime で動作します。Python や `.venv` は不要です。
