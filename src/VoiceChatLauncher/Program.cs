@@ -295,6 +295,12 @@ namespace VoiceChatLauncher
 
         private void RunAction()
         {
+            if (_config.UseNewChatGpt)
+            {
+                new DesktopChatGptAutomation(_config, Log).StartNewVoiceChat();
+                return;
+            }
+
             AutomationElement window = FindChatGptWindow();
             if (window == null)
             {

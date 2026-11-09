@@ -19,6 +19,7 @@ namespace VoiceChatLauncher
 {
     internal sealed class AppConfig
     {
+        public bool UseNewChatGpt = true;
         public int CooldownMilliseconds = 4000;
         public string OpenWakeWordModels = @"..\models\Hey_Lucy_20260609_095011.onnx";
         public string OpenWakeWordMelspectrogramModelPath = @"..\models\melspectrogram.onnx";
@@ -110,6 +111,7 @@ namespace VoiceChatLauncher
             builder.AppendLine("# Separate multiple values with |");
             builder.AppendLine();
             builder.AppendLine("# Voice settings. Edit from the tray Settings screen or update this file directly.");
+            AppendValue(builder, "UseNewChatGpt", FormatBool(UseNewChatGpt));
             AppendValue(builder, "OpenWakeWordModels", OpenWakeWordModels);
             AppendValue(builder, "OpenWakeWordMelspectrogramModelPath", OpenWakeWordMelspectrogramModelPath);
             AppendValue(builder, "OpenWakeWordEmbeddingModelPath", OpenWakeWordEmbeddingModelPath);
@@ -159,7 +161,11 @@ namespace VoiceChatLauncher
 
         private static void Apply(AppConfig config, string key, string value)
         {
-            if (EqualsKey(key, "OpenWakeWordModels"))
+            if (EqualsKey(key, "UseNewChatGpt"))
+            {
+                config.UseNewChatGpt = ParseBool(value, config.UseNewChatGpt);
+            }
+            else if (EqualsKey(key, "OpenWakeWordModels"))
             {
                 config.OpenWakeWordModels = value;
             }
@@ -364,6 +370,9 @@ namespace VoiceChatLauncher
             return
 @"# Voice Chat Launcher settings
 # Separate multiple values with |
+
+# true: new ChatGPT, a new normal chat each time. false: Classic settings below.
+UseNewChatGpt=true
 
 # The wake word that triggers ChatGPT voice mode.
 # Say ""Hey Lucy"" by default.

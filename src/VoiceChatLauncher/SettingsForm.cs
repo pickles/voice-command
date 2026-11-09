@@ -30,6 +30,7 @@ namespace VoiceChatLauncher
         private CheckBox _openWakeWordLogScoresBox;
         private NumericUpDown _cooldownMillisecondsBox;
         private TextBox _launchCommandBox;
+        private CheckBox _useNewChatGptBox;
         private TextBox _launchArgumentsBox;
         private CheckBox _runActionOnStartupBox;
         private NumericUpDown _startupActionDelayMillisecondsBox;
@@ -137,7 +138,8 @@ namespace VoiceChatLauncher
             var tab = new TabPage("起動");
             var panel = CreateFormPanel();
 
-            _launchCommandBox = AddTextBox(panel, "起動コマンド", "例: chatgpt:");
+            _useNewChatGptBox = AddCheckBox(panel, "新しい ChatGPT で毎回新規の通常チャットを開始する");
+            _launchCommandBox = AddTextBox(panel, "Classic起動コマンド", "新版では起動先・ボタン検出・位置クリック設定は使いません");
             _launchArgumentsBox = AddTextBox(panel, "起動引数", "必要な場合のみ指定");
             _runActionOnStartupBox = AddCheckBox(panel, "起動時に音声ボタンを押す");
             _startupActionDelayMillisecondsBox = AddIntBox(panel, "起動時実行の待機(ms)", 0, 600000, 100);
@@ -296,6 +298,7 @@ namespace VoiceChatLauncher
             _openWakeWordLogScoresBox.Checked = _config.OpenWakeWordLogScores;
             _cooldownMillisecondsBox.Value = ClampDecimal(_config.CooldownMilliseconds, _cooldownMillisecondsBox.Minimum, _cooldownMillisecondsBox.Maximum);
             _launchCommandBox.Text = _config.LaunchCommand;
+            _useNewChatGptBox.Checked = _config.UseNewChatGpt;
             _launchArgumentsBox.Text = _config.LaunchArguments;
             _runActionOnStartupBox.Checked = _config.RunActionOnStartup;
             _startupActionDelayMillisecondsBox.Value = ClampDecimal(_config.StartupActionDelayMilliseconds, _startupActionDelayMillisecondsBox.Minimum, _startupActionDelayMillisecondsBox.Maximum);
@@ -344,7 +347,7 @@ namespace VoiceChatLauncher
                     return;
                 }
 
-                if (voiceButtonNames.Count == 0 && !_rightmostVoiceButtonFallbackBox.Checked && !_coordinateFallbackEnabledBox.Checked)
+                if (!_useNewChatGptBox.Checked && voiceButtonNames.Count == 0 && !_rightmostVoiceButtonFallbackBox.Checked && !_coordinateFallbackEnabledBox.Checked)
                 {
                     ShowValidationError("音声ボタン名を入力するか、フォールバックを有効にしてください。");
                     return;
@@ -359,6 +362,7 @@ namespace VoiceChatLauncher
                 _config.OpenWakeWordLogScores = _openWakeWordLogScoresBox.Checked;
                 _config.CooldownMilliseconds = (int)_cooldownMillisecondsBox.Value;
                 _config.LaunchCommand = _launchCommandBox.Text.Trim();
+                _config.UseNewChatGpt = _useNewChatGptBox.Checked;
                 _config.LaunchArguments = _launchArgumentsBox.Text.Trim();
                 _config.RunActionOnStartup = _runActionOnStartupBox.Checked;
                 _config.StartupActionDelayMilliseconds = (int)_startupActionDelayMillisecondsBox.Value;
