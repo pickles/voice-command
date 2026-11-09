@@ -19,9 +19,21 @@ OpenWakeWord でウェイクワードを待ち受け、ChatGPT Windows アプリ
 2. `build.ps1` を実行します。
 3. `bin\VoiceChatLauncher.exe` を起動します。
 4. 起動後はウェイクワードを待ち受けます。
-5. 既定では `Hey Lucy` と言うと、ChatGPT を探して前面に出し、音声ボタンを押します。
+5. 既定では `Hey Lucy` と言うと、新しい ChatGPT で通常の新規チャットを開き、音声開始ボタンを押します。
 
-うまく動かない場合は `diagnose.ps1` を実行すると、利用できる音声認識エンジンと ChatGPT アプリの登録名を確認できます。
+うまく動かない場合は `diagnose.ps1` を実行すると、ChatGPT アプリの登録名を確認できます。
+
+## 新しい ChatGPT への移行
+
+`UseNewChatGpt=true` が既定です。既存の `bin\config.ini` にこの項目がなくても新版を使います。設定ファイルやマイク・ウェイクワード設定を上書きする必要はありません。ビルド後、実行中のランチャーを終了して新しい実行ファイルを起動してください。
+
+Microsoft Store 版の新しい ChatGPT（パッケージ `OpenAI.Codex_2p2nqsd0c76g0`）を対象とします。毎回 `codex://threads/new?mode=chat` を開くため、Work / Codex の作業中でも通常の新規チャットで始めます。前面ウィンドウのパッケージを検査し、Classic と区別します。日本語の「新しい音声チャットを開始」または英語の `Start new voice chat` が表示され、有効で、UI Automation の Invoke 操作を公開している場合だけ押します。画面を他のアプリへ切り替えた場合は中止します。
+
+この経路はインストール済み ChatGPT 26.1103.4239 の実装と日本語リソースで確認しました。公開APIではないため、更新で変わる可能性があります。音声機能の利用可否やマイク権限は ChatGPT 側で確認してください。[公式の音声機能案内](https://learn.chatgpt.com/docs/features/voice)。音声入力（文字起こし）と音声チャットは別機能です。
+
+新版では `LaunchCommand` / `LaunchArguments`、ウィンドウのタイトル・プロセス名・位置設定、`VoiceButtonNames` / `ExcludedButtonNames`、位置クリックの設定を使いません。`StartupDelayMilliseconds`、`AfterBringToFrontDelayMilliseconds`、`WindowTimeoutMilliseconds`、`ButtonTimeoutMilliseconds` は共通です。設定画面「起動」の新版チェックを外すか `UseNewChatGpt=false` を指定すると、従来の Classic 用設定で動作します。
+
+動作確認はトレイの「今すぐ起動」で行ってください。通常の新規チャットで音声が始まることを確認して終了し、続いて `Hey Lucy` で同じ動作を確認します。Classic 同時起動時と、Work / Codex 表示中でも確認してください。ログの `New ChatGPT voice button invoked` はボタン操作の完了を示し、音声接続の成功を保証するものではありません。
 
 ## ビルド
 
@@ -61,6 +73,7 @@ bin\config.ini
 - `OpenWakeWordEmbeddingModelPath`: OpenWakeWord の特徴量生成に使う `embedding_model.onnx` です。
 - `OpenWakeWordThreshold`: 反応のしきい値です。誤反応が多い場合は上げ、反応しにくい場合は下げます。
 - `OpenWakeWordDevice`: マイクを明示指定したい場合にデバイス番号を入れます。
+- `UseNewChatGpt`: `true`（既定）で新版の通常チャットを毎回新規に開きます。以下の Classic 用検出・位置クリック設定は `false` のときだけ使います。
 - `LaunchCommand`: ChatGPT の起動方法です。`chatgpt:` で起動しない場合は、ChatGPT アプリの実行ファイル、または `shell:AppsFolder\<AppID>` を指定します。
 - `ProcessNames`: 既に起動中の ChatGPT を探すためのプロセス名です。`.exe` 付きでも指定できます。
 - `MinimumWindowWidth` / `MinimumWindowHeight`: ChatGPT の小さな補助ウィンドウを誤検出しないための最小サイズです。

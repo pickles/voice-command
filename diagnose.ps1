@@ -18,6 +18,12 @@ try {
             Write-Host ("  Name:  {0}" -f $app.Name)
             Write-Host ("  AppID: {0}" -f $app.AppID)
             Write-Host ("  Use:   shell:AppsFolder\{0}" -f $app.AppID)
+            if ($app.AppID -eq "OpenAI.Codex_2p2nqsd0c76g0!App") {
+                Write-Host "  Target: New ChatGPT (UseNewChatGpt=true)"
+                Write-Host "  New normal chat: codex://threads/new?mode=chat"
+            } elseif ($app.AppID -like "OpenAI.ChatGPT-Desktop_*!*") {
+                Write-Host "  Target: Classic (UseNewChatGpt=false)"
+            }
             Write-Host ""
         }
     }
