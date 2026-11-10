@@ -57,6 +57,19 @@ namespace VoiceChatLauncher
 
         public bool SettingsSaved { get; private set; }
 
+        internal void ShowForUser()
+        {
+            Show();
+            if (WindowState == FormWindowState.Minimized)
+                WindowState = FormWindowState.Normal;
+            // STARTUPINFO/SW_HIDE can suppress the first native ShowWindow call,
+            // while WinForms already reports Visible=true. Activate alone cannot
+            // recover that state; explicitly show the HWND after Form.Show().
+            NativeMethods.ShowWindow(Handle, NativeMethods.SW_SHOW);
+            BringToFront();
+            Activate();
+        }
+
         public SettingsForm(AppConfig config, string configPath)
         {
             _config = config;
