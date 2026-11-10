@@ -31,6 +31,8 @@ namespace VoiceChatLauncher
         private NumericUpDown _cooldownMillisecondsBox;
         private TextBox _launchCommandBox;
         private CheckBox _useNewChatGptBox;
+        private CheckBox _startWithWindowsBox;
+        private Label _startupRegistrationStatus;
         private TextBox _launchArgumentsBox;
         private CheckBox _runActionOnStartupBox;
         private NumericUpDown _startupActionDelayMillisecondsBox;
@@ -83,6 +85,7 @@ namespace VoiceChatLauncher
             var tabs = new TabControl();
             tabs.Dock = DockStyle.Fill;
             tabs.TabPages.Add(CreateOpenWakeWordTab());
+            tabs.TabPages.Add(CreateWindowsStartupTab());
             tabs.TabPages.Add(CreateLaunchTab());
             tabs.TabPages.Add(CreateWindowTab());
             tabs.TabPages.Add(CreateVoiceButtonTab());
@@ -131,6 +134,38 @@ namespace VoiceChatLauncher
 
             tab.Controls.Add(panel);
             return tab;
+        }
+
+        private TabPage CreateWindowsStartupTab()
+        {
+            var tab = new TabPage("自動起動");
+            var panel = CreateFormPanel();
+            _startWithWindowsBox = AddCheckBox(panel, "Windows サインイン時に自動起動する");
+            _startupRegistrationStatus = CreateLabel(string.Empty);
+            _startupRegistrationStatus.MaximumSize = new System.Drawing.Size(400, 0);
+            AddRow(panel, "現在の登録", _startupRegistrationStatus);
+            var help = CreateLabel("保存すると、このユーザーの自動起動登録を変更します。\n" +
+                "Windows 側でスタートアップを無効にしている場合は、Windows の設定でも有効にしてください。\n" +
+                "アプリを移動した場合は、移動先から起動して再度保存してください。");
+            help.MaximumSize = new System.Drawing.Size(400, 0);
+            AddRow(panel, string.Empty, help);
+            tab.Controls.Add(panel);
+            return tab;
+        }
+
+        private void LoadStartupRegistration()
+        {
+            try
+            {
+                string command = StartupRegistration.ReadCommand();
+                _startWithWindowsBox.Checked = command != null;
+                _startupRegistrationStatus.Text = command == null ? "未登録" : "登録済み: " + command;
+            }
+            catch (Exception ex)
+            {
+                _startWithWindowsBox.Enabled = false;
+                _startupRegistrationStatus.Text = "登録状態を読み取れません: " + ex.Message;
+            }
         }
 
         private TabPage CreateLaunchTab()
@@ -289,6 +324,7 @@ namespace VoiceChatLauncher
 
         private void LoadValues()
         {
+            LoadStartupRegistration();
             _openWakeWordModelsBox.Text = _config.OpenWakeWordModels;
             _openWakeWordMelspectrogramModelPathBox.Text = _config.OpenWakeWordMelspectrogramModelPath;
             _openWakeWordEmbeddingModelPathBox.Text = _config.OpenWakeWordEmbeddingModelPath;
@@ -386,6 +422,21 @@ namespace VoiceChatLauncher
 
                 _config.Save(_configPath);
                 SettingsSaved = true;
+                if (_startWithWindowsBox.Enabled)
+                {
+                    try
+                    {
+                        StartupRegistration.SetEnabled(_startWithWindowsBox.Checked, Application.ExecutablePath);
+                        LoadStartupRegistration();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("通常の設定は保存しましたが、自動起動の変更に失敗しました。\n" + ex.Message,
+                            "自動起動を変更できません", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        LoadStartupRegistration();
+                        return;
+                    }
+                }
                 Close();
             }
             catch (Exception ex)
