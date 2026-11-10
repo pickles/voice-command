@@ -1073,27 +1073,33 @@ namespace VoiceChatLauncher
 
         private void OpenConfig()
         {
-            if (_settingsForm != null && !_settingsForm.IsDisposed)
-            {
-                _settingsForm.Activate();
-                return;
-            }
-
+            Log("Settings requested");
             try
             {
+                if (_settingsForm != null && !_settingsForm.IsDisposed)
+                {
+                    Log("Restoring settings: visible=" + _settingsForm.Visible + " state=" + _settingsForm.WindowState);
+                    _settingsForm.ShowForUser();
+                    Log("Settings restored: native_visible=" + NativeMethods.IsWindowVisible(_settingsForm.Handle));
+                    return;
+                }
+
+                Log("Creating settings window");
                 _settingsForm = new SettingsForm(AppConfig.Load(_configPath), _configPath);
+                _settingsForm.Shown += delegate { Log("Settings window shown"); };
                 _settingsForm.FormClosed += delegate(object sender, FormClosedEventArgs e)
                 {
+                    Log("Settings window closed: " + e.CloseReason);
                     var form = sender as SettingsForm;
+                    _settingsForm = null;
                     if (form != null && form.SettingsSaved)
                     {
                         Reload();
                     }
-
-                    _settingsForm = null;
                 };
-                _settingsForm.Show();
-                _settingsForm.Activate();
+                Log("Showing settings window");
+                _settingsForm.ShowForUser();
+                Log("Settings displayed: native_visible=" + NativeMethods.IsWindowVisible(_settingsForm.Handle));
             }
             catch (Exception ex)
             {
