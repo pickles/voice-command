@@ -24,12 +24,15 @@ namespace VoiceChatLauncher
 
         public void StartNewVoiceChat()
         {
+            IntPtr expectedWindow = IntPtr.Zero;
+            if (_config.OpenChatInNewWindow)
+                expectedWindow = DesktopWindowCreation.Create(_config, delegate { return WaitForDesktopWindow(IntPtr.Zero); }, _log);
             // Always open a new normal chat, even when a Work/Codex task is active.
             using (Process launched = Process.Start(new ProcessStartInfo(NewChatUri) { UseShellExecute = true })) { }
             _log("Opening new ChatGPT chat: " + NewChatUri);
             Thread.Sleep(Math.Max(0, _config.StartupDelayMilliseconds));
 
-            IntPtr handle = WaitForDesktopWindow();
+            IntPtr handle = WaitForDesktopWindow(expectedWindow);
             Thread.Sleep(Math.Max(0, _config.AfterBringToFrontDelayMilliseconds));
             var timer = Stopwatch.StartNew();
             string lastError = null;
@@ -86,7 +89,7 @@ namespace VoiceChatLauncher
             _log("New ChatGPT voice button invoked (voice connection requires manual confirmation).");
         }
 
-        private IntPtr WaitForDesktopWindow()
+        private IntPtr WaitForDesktopWindow(IntPtr expectedWindow)
         {
             var timer = Stopwatch.StartNew();
             do
@@ -94,7 +97,7 @@ namespace VoiceChatLauncher
                 IntPtr handle = GetForegroundWindow();
                 int processId;
                 NativeMethods.GetWindowThreadProcessId(handle, out processId);
-                if (handle != IntPtr.Zero && IsDesktopProcess(processId))
+                if (handle != IntPtr.Zero && (expectedWindow == IntPtr.Zero || handle == expectedWindow) && IsDesktopProcess(processId))
                 {
                     _log("New ChatGPT foreground window found: " + handle);
                     return handle;
