@@ -187,9 +187,9 @@ namespace VoiceChatLauncher
             var tab = new TabPage("起動");
             var panel = CreateFormPanel();
 
-            _useNewChatGptBox = AddCheckBox(panel, "新しい ChatGPT で毎回新規の通常チャットを開始する");
-            _openChatInNewWindowBox = AddCheckBox(panel, "音声チャットを新規ウィンドウで開く（新版のみ）");
-            _useNewChatGptBox.CheckedChanged += delegate { _openChatInNewWindowBox.Enabled = _useNewChatGptBox.Checked; };
+            _useNewChatGptBox = AddCheckBox(panel, "新しい ChatGPT に Ctrl+Shift+? を送信する");
+            _openChatInNewWindowBox = AddCheckBox(panel, "新規ウィンドウを開く（ショートカット送信では不使用）");
+            _openChatInNewWindowBox.Enabled = false;
             _launchCommandBox = AddTextBox(panel, "Classic起動コマンド", "新版では起動先・ボタン検出・位置クリック設定は使いません");
             _launchArgumentsBox = AddTextBox(panel, "起動引数", "必要な場合のみ指定");
             _runActionOnStartupBox = AddCheckBox(panel, "起動時に音声ボタンを押す");
@@ -352,7 +352,7 @@ namespace VoiceChatLauncher
             _launchCommandBox.Text = _config.LaunchCommand;
             _useNewChatGptBox.Checked = _config.UseNewChatGpt;
             _openChatInNewWindowBox.Checked = _config.OpenChatInNewWindow;
-            _openChatInNewWindowBox.Enabled = _config.UseNewChatGpt;
+            _openChatInNewWindowBox.Enabled = false;
             _launchArgumentsBox.Text = _config.LaunchArguments;
             _runActionOnStartupBox.Checked = _config.RunActionOnStartup;
             _startupActionDelayMillisecondsBox.Value = ClampDecimal(_config.StartupActionDelayMilliseconds, _startupActionDelayMillisecondsBox.Minimum, _startupActionDelayMillisecondsBox.Maximum);

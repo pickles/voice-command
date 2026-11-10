@@ -297,7 +297,7 @@ namespace VoiceChatLauncher
         {
             if (_config.UseNewChatGpt)
             {
-                new DesktopChatGptAutomation(_config, Log).StartNewVoiceChat();
+                new DesktopChatGptAutomation(Log).StartNewVoiceChat();
                 return;
             }
 
