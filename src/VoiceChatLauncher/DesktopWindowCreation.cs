@@ -18,20 +18,22 @@ namespace VoiceChatLauncher
                 @"shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App") { UseShellExecute = true })) { }
             IntPtr original = waitForWindow();
             Thread.Sleep(Math.Max(0, config.StartupDelayMilliseconds));
-            var existing = SnapshotWindows();
+            // Shell activation is asynchronous and can select another existing window.
+            original = waitForWindow();
             RequireForeground(original);
-            log("Opening ChatGPT command menu to create a separate window.");
+            log("Opening ChatGPT command menu: hwnd=" + original);
             SendKeys.SendWait("^+p");
 
-            AutomationElement dialog = WaitForDialog(original, config.ButtonTimeoutMilliseconds);
+            AutomationElement dialog = WaitForDialog(ref original, config.ButtonTimeoutMilliseconds, log);
             bool japanese = dialog.Current.Name == "コマンドのメニュー";
             // Scope the search to actions so a similarly named chat cannot be selected.
             AutomationElement actions = FindAction(dialog, japanese ? "アクション" : "Actions");
             if (actions == null)
                 throw new InvalidOperationException("コマンドメニューの「アクション」が見つかりません。新規ウィンドウの作成を中止しました。");
+            log("Selecting command menu Actions: hwnd=" + original);
             Activate(actions, original);
             Thread.Sleep(300);
-            dialog = WaitForDialog(original, config.ButtonTimeoutMilliseconds);
+            dialog = WaitForDialog(ref original, config.ButtonTimeoutMilliseconds, log);
             AutomationElement input = dialog.FindFirst(TreeScope.Descendants,
                 new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox)));
@@ -40,20 +42,23 @@ namespace VoiceChatLauncher
                 throw new InvalidOperationException("コマンドメニューの検索欄を操作できませんでした。");
             RequireForeground(original);
             string command = japanese ? "新しいウィンドウ" : "New Window";
+            log("Searching New Window command: hwnd=" + original);
             ((ValuePattern)value).SetValue(command);
 
             var timer = Stopwatch.StartNew();
             AutomationElement action = null;
             do
             {
-                RequireForeground(original);
-                dialog = WaitForDialog(original, config.ButtonTimeoutMilliseconds);
+                dialog = WaitForDialog(ref original, config.ButtonTimeoutMilliseconds, log);
                 action = FindAction(dialog, command);
                 if (action != null) break;
                 Thread.Sleep(200);
             } while (timer.ElapsedMilliseconds < config.ButtonTimeoutMilliseconds);
             if (action == null)
                 throw new InvalidOperationException("「新しいウィンドウ」コマンドが見つかりませんでした。");
+            // A command-menu popup must not itself be counted as the new chat window.
+            var existing = SnapshotWindows();
+            log("Invoking New Window command: hwnd=" + original);
             Activate(action, original); // Never repeat a possibly successful creation action.
 
             timer.Restart();
@@ -89,30 +94,48 @@ namespace VoiceChatLauncher
             return result;
         }
 
-        private static AutomationElement WaitForDialog(IntPtr handle, int timeout)
+        private static AutomationElement WaitForDialog(ref IntPtr handle, int timeout, Action<string> log)
         {
             var timer = Stopwatch.StartNew();
             do
             {
-                RequireForeground(handle);
+                IntPtr foreground = GetForegroundWindow();
+                int processId;
+                NativeMethods.GetWindowThreadProcessId(foreground, out processId);
+                if (foreground == IntPtr.Zero || !DesktopChatGptAutomation.IsDesktopProcess(processId))
+                    throw new InvalidOperationException("ChatGPT 以外のアプリに切り替わったため、コマンドメニューの操作を中止しました。hwnd=" + foreground);
                 try
                 {
-                    AutomationElement root = AutomationElement.FromHandle(handle);
-                    var matches = root.FindAll(TreeScope.Descendants, new OrCondition(
-                        new PropertyCondition(AutomationElement.NameProperty, "Command menu"),
-                        new PropertyCondition(AutomationElement.NameProperty, "コマンドのメニュー")));
-                    foreach (AutomationElement match in matches)
+                    AutomationElement match = FindCommandDialog(AutomationElement.FromHandle(foreground));
+                    if (match != null && GetForegroundWindow() == foreground)
                     {
-                        if (!match.Current.IsOffscreen && match.FindFirst(TreeScope.Descendants,
-                            new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
-                                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox))) != null)
-                            return match;
+                        if (handle != foreground)
+                            log("Following ChatGPT command menu: old_hwnd=" + handle + " new_hwnd=" + foreground);
+                        handle = foreground;
+                        log("Command menu found: hwnd=" + handle);
+                        return match;
                     }
                 }
                 catch (ElementNotAvailableException) { }
                 Thread.Sleep(200);
             } while (timer.ElapsedMilliseconds < timeout);
             throw new InvalidOperationException("ChatGPT のコマンドメニューを開けませんでした。Ctrl+Shift+P の割り当てを確認してください。");
+        }
+
+        internal static AutomationElement FindCommandDialog(AutomationElement root)
+        {
+            // The menu can be an embedded dialog or a separate native window root.
+            var matches = root.FindAll(TreeScope.Subtree, new OrCondition(
+                new PropertyCondition(AutomationElement.NameProperty, "Command menu"),
+                new PropertyCondition(AutomationElement.NameProperty, "コマンドのメニュー")));
+            foreach (AutomationElement match in matches)
+            {
+                if (!match.Current.IsOffscreen && match.FindFirst(TreeScope.Descendants,
+                    new OrCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox))) != null)
+                    return match;
+            }
+            return null;
         }
 
         private static AutomationElement FindAction(AutomationElement dialog, string name)
@@ -164,7 +187,7 @@ namespace VoiceChatLauncher
         private static void RequireForeground(IntPtr handle)
         {
             if (GetForegroundWindow() != handle)
-                throw new InvalidOperationException("前面ウィンドウが切り替わったため、新規ウィンドウの作成を中止しました。");
+                throw new InvalidOperationException("前面ウィンドウが切り替わったため、新規ウィンドウの作成を中止しました。expected_hwnd=" + handle + " actual_hwnd=" + GetForegroundWindow());
         }
 
         [DllImport("user32.dll")]
