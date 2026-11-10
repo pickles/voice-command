@@ -51,6 +51,8 @@ Use these commands from the repository root:
 
 ## Validation
 
+The user authorizes stopping, building, and restarting this project's running `VoiceChatLauncher.exe` when building. Match the executable's full path before stopping it, preserve `bin/config.ini`, and restart the app after a successful build.
+
 Before finishing code changes, run:
 
 ```powershell
