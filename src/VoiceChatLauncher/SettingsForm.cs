@@ -31,6 +31,7 @@ namespace VoiceChatLauncher
         private NumericUpDown _cooldownMillisecondsBox;
         private TextBox _launchCommandBox;
         private CheckBox _useNewChatGptBox;
+        private CheckBox _openChatInNewWindowBox;
         private CheckBox _startWithWindowsBox;
         private Label _startupRegistrationStatus;
         private TextBox _launchArgumentsBox;
@@ -174,6 +175,8 @@ namespace VoiceChatLauncher
             var panel = CreateFormPanel();
 
             _useNewChatGptBox = AddCheckBox(panel, "新しい ChatGPT で毎回新規の通常チャットを開始する");
+            _openChatInNewWindowBox = AddCheckBox(panel, "音声チャットを新規ウィンドウで開く（新版のみ）");
+            _useNewChatGptBox.CheckedChanged += delegate { _openChatInNewWindowBox.Enabled = _useNewChatGptBox.Checked; };
             _launchCommandBox = AddTextBox(panel, "Classic起動コマンド", "新版では起動先・ボタン検出・位置クリック設定は使いません");
             _launchArgumentsBox = AddTextBox(panel, "起動引数", "必要な場合のみ指定");
             _runActionOnStartupBox = AddCheckBox(panel, "起動時に音声ボタンを押す");
@@ -335,6 +338,8 @@ namespace VoiceChatLauncher
             _cooldownMillisecondsBox.Value = ClampDecimal(_config.CooldownMilliseconds, _cooldownMillisecondsBox.Minimum, _cooldownMillisecondsBox.Maximum);
             _launchCommandBox.Text = _config.LaunchCommand;
             _useNewChatGptBox.Checked = _config.UseNewChatGpt;
+            _openChatInNewWindowBox.Checked = _config.OpenChatInNewWindow;
+            _openChatInNewWindowBox.Enabled = _config.UseNewChatGpt;
             _launchArgumentsBox.Text = _config.LaunchArguments;
             _runActionOnStartupBox.Checked = _config.RunActionOnStartup;
             _startupActionDelayMillisecondsBox.Value = ClampDecimal(_config.StartupActionDelayMilliseconds, _startupActionDelayMillisecondsBox.Minimum, _startupActionDelayMillisecondsBox.Maximum);
@@ -399,6 +404,7 @@ namespace VoiceChatLauncher
                 _config.CooldownMilliseconds = (int)_cooldownMillisecondsBox.Value;
                 _config.LaunchCommand = _launchCommandBox.Text.Trim();
                 _config.UseNewChatGpt = _useNewChatGptBox.Checked;
+                _config.OpenChatInNewWindow = _openChatInNewWindowBox.Checked;
                 _config.LaunchArguments = _launchArgumentsBox.Text.Trim();
                 _config.RunActionOnStartup = _runActionOnStartupBox.Checked;
                 _config.StartupActionDelayMilliseconds = (int)_startupActionDelayMillisecondsBox.Value;
