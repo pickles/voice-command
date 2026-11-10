@@ -1,6 +1,6 @@
 # Voice Chat Launcher
 
-OpenWakeWord でウェイクワードを待ち受け、ChatGPT Windows アプリを開いて音声ボタンを押す常駐アプリです。
+OpenWakeWord でウェイクワードを待ち受け、ChatGPT Windows アプリの音声開始ショートカットを送信する常駐アプリです。
 
 ## 前提条件
 
@@ -19,7 +19,7 @@ OpenWakeWord でウェイクワードを待ち受け、ChatGPT Windows アプリ
 2. `build.ps1` を実行します。
 3. `bin\VoiceChatLauncher.exe` を起動します。
 4. 起動後はウェイクワードを待ち受けます。
-5. 既定では `Hey Lucy` と言うと、新しい ChatGPT で通常の新規チャットを開き、音声開始ボタンを押します。
+5. 既定では `Hey Lucy` と言うと、音声開始ショートカット `Ctrl+Shift+?` を送信します。
 
 うまく動かない場合は `diagnose.ps1` を実行すると、ChatGPT アプリの登録名を確認できます。
 
@@ -27,22 +27,11 @@ OpenWakeWord でウェイクワードを待ち受け、ChatGPT Windows アプリ
 
 `UseNewChatGpt=true` が既定です。既存の `bin\config.ini` にこの項目がなくても新版を使います。設定ファイルやマイク・ウェイクワード設定を上書きする必要はありません。ビルド後、実行中のランチャーを終了して新しい実行ファイルを起動してください。
 
-Microsoft Store 版の新しい ChatGPT（パッケージ `OpenAI.Codex_2p2nqsd0c76g0`）を対象とします。毎回 `codex://threads/new?mode=chat` を開くため、Work / Codex の作業中でも通常の新規チャットで始めます。前面ウィンドウのパッケージを検査し、Classic と区別します。日本語の「新しい音声チャットを開始」または英語の `Start new voice chat` が表示され、有効で、UI Automation の Invoke 操作を公開している場合だけ押します。画面を他のアプリへ切り替えた場合は中止します。
+ChatGPT 本体の音声チャット開始ショートカットを `Ctrl+Shift+?` に設定してください。ウェイクワードを検出すると、このキー入力だけを一度送信します。ウィンドウの起動・作成・前面化、新規チャットへの移動、ボタン検出は行いません。ChatGPT はあらかじめ起動しておいてください。
 
-この経路はインストール済み ChatGPT 26.1103.4239 の実装と日本語リソースで確認しました。公開APIではないため、更新で変わる可能性があります。音声機能の利用可否やマイク権限は ChatGPT 側で確認してください。[公式の音声機能案内](https://learn.chatgpt.com/docs/features/voice)。音声入力（文字起こし）と音声チャットは別機能です。
+新版では `OpenChatInNewWindow`、`LaunchCommand` / `LaunchArguments`、起動後や前面化後の待機時間、ウィンドウ・ボタン検出・位置クリックの設定を使いません。以前の新規ウィンドウ設定は保存したまま、設定画面では無効表示にしています。`UseNewChatGpt=false` にすると従来の Classic 用設定で動作します。
 
-新版では `LaunchCommand` / `LaunchArguments`、ウィンドウのタイトル・プロセス名・位置設定、`VoiceButtonNames` / `ExcludedButtonNames`、位置クリックの設定を使いません。`StartupDelayMilliseconds`、`AfterBringToFrontDelayMilliseconds`、`WindowTimeoutMilliseconds`、`ButtonTimeoutMilliseconds` は共通です。設定画面「起動」の新版チェックを外すか `UseNewChatGpt=false` を指定すると、従来の Classic 用設定で動作します。
-
-動作確認はトレイの「今すぐ起動」で行ってください。通常の新規チャットで音声が始まることを確認して終了し、続いて `Hey Lucy` で同じ動作を確認します。Classic 同時起動時と、Work / Codex 表示中でも確認してください。ログの `New ChatGPT voice button invoked` はボタン操作の完了を示し、音声接続の成功を保証するものではありません。
-
-### 音声チャットを新しいウィンドウで開く
-
-設定の `起動` タブで `音声チャットを新規ウィンドウで開く（新版のみ）` を有効にすると、毎回新しいウィンドウを作って通常の音声チャットを開始します。INI では `OpenChatInNewWindow=true` です。既定は `false` で、従来どおり既存ウィンドウを使います。`UseNewChatGpt=false` の Classic モードではこの設定を使いません。
-
-新版のコマンドメニュー（標準の `Ctrl+Shift+P`）を開き、「アクション」から「新しいウィンドウ」を選びます。日本語・英語に対応します。ショートカットを変更している場合は標準に戻してください。新規ウィンドウを識別できない場合はエラーにして、既存ウィンドウで音声を開始する代替操作はしません。処理中はウィンドウを切り替えないでください。メニュー操作に失敗してメニューが残った場合は `Esc` で閉じられます。
-
-検証時は ChatGPT の既存チャットを開いた状態で、この設定を有効にしてトレイの `今すぐ起動` を選びます。既存のチャットが保たれ、別ウィンドウで通常の音声チャットが始まることを確認してください。
-
+動作確認はトレイの「今すぐ起動」、または `Hey Lucy` で行います。ログの `New ChatGPT voice shortcut sent` はキー送信の完了を示します。実際の音声開始は ChatGPT 側で確認してください。
 ## ビルド
 
 初回セットアップ:
@@ -93,7 +82,7 @@ Windows のスタートアップ設定で無効化している場合は、そち
 - `OpenWakeWordEmbeddingModelPath`: OpenWakeWord の特徴量生成に使う `embedding_model.onnx` です。
 - `OpenWakeWordThreshold`: 反応のしきい値です。誤反応が多い場合は上げ、反応しにくい場合は下げます。
 - `OpenWakeWordDevice`: マイクを明示指定したい場合にデバイス番号を入れます。
-- `UseNewChatGpt`: `true`（既定）で新版の通常チャットを毎回新規に開きます。以下の Classic 用検出・位置クリック設定は `false` のときだけ使います。
+- `UseNewChatGpt`: `true`（既定）で `Ctrl+Shift+?` だけを送信します。以下の Classic 用検出・位置クリック設定は `false` のときだけ使います。
 - `LaunchCommand`: ChatGPT の起動方法です。`chatgpt:` で起動しない場合は、ChatGPT アプリの実行ファイル、または `shell:AppsFolder\<AppID>` を指定します。
 - `ProcessNames`: 既に起動中の ChatGPT を探すためのプロセス名です。`.exe` 付きでも指定できます。
 - `MinimumWindowWidth` / `MinimumWindowHeight`: ChatGPT の小さな補助ウィンドウを誤検出しないための最小サイズです。
