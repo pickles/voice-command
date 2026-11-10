@@ -47,11 +47,17 @@ namespace VoiceChatLauncher
 
             var timer = Stopwatch.StartNew();
             AutomationElement action = null;
+            bool candidatesLogged = false;
             do
             {
                 dialog = WaitForDialog(ref original, config.ButtonTimeoutMilliseconds, log);
                 action = FindAction(dialog, command);
                 if (action != null) break;
+                if (!candidatesLogged)
+                {
+                    LogCommandCandidates(dialog, log);
+                    candidatesLogged = true;
+                }
                 Thread.Sleep(200);
             } while (timer.ElapsedMilliseconds < config.ButtonTimeoutMilliseconds);
             if (action == null)
@@ -112,7 +118,6 @@ namespace VoiceChatLauncher
                         if (handle != foreground)
                             log("Following ChatGPT command menu: old_hwnd=" + handle + " new_hwnd=" + foreground);
                         handle = foreground;
-                        log("Command menu found: hwnd=" + handle);
                         return match;
                     }
                 }
@@ -138,7 +143,7 @@ namespace VoiceChatLauncher
             return null;
         }
 
-        private static AutomationElement FindAction(AutomationElement dialog, string name)
+        internal static AutomationElement FindAction(AutomationElement dialog, string name)
         {
             var matches = dialog.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.NameProperty, name, PropertyConditionFlags.IgnoreCase));
@@ -148,16 +153,46 @@ namespace VoiceChatLauncher
                 while (element != null && !Automation.Compare(element, dialog))
                 {
                     var current = element.Current;
+                    object pattern;
                     if (current.ControlType == ControlType.Button || current.ControlType == ControlType.ListItem ||
                         current.ControlType == ControlType.MenuItem || current.ControlType == ControlType.TabItem)
                     {
                         if (!current.IsOffscreen && current.IsEnabled) return element;
                         break;
                     }
+                    if (current.ControlType != ControlType.Edit && current.ControlType != ControlType.ComboBox &&
+                        (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern) ||
+                         element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)))
+                    {
+                        if (!current.IsOffscreen && current.IsEnabled) return element;
+                        break;
+                    }
                     element = TreeWalker.ControlViewWalker.GetParent(element);
+                }
+                // Chromium options can expose their title as Text under a generic
+                // container, without one of the WinForms-style control types above.
+                // Click only the exact visible result title, never the query input.
+                var title = match.Current;
+                if (title.ControlType == ControlType.Text && !title.IsOffscreen && title.IsEnabled)
+                {
+                    Point point;
+                    if (match.TryGetClickablePoint(out point)) return match;
                 }
             }
             return null;
+        }
+
+        private static void LogCommandCandidates(AutomationElement dialog, Action<string> log)
+        {
+            var elements = dialog.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+            int count = 0;
+            foreach (AutomationElement element in elements)
+            {
+                var current = element.Current;
+                if (current.IsOffscreen || string.IsNullOrWhiteSpace(current.Name)) continue;
+                log("Command result candidate: type=" + current.ControlType.ProgrammaticName + " name=" + current.Name);
+                if (++count >= 30) break;
+            }
         }
 
         private static void Activate(AutomationElement element, IntPtr window)
